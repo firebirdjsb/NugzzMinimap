@@ -1,0 +1,23 @@
+# Visual Studio and .NET
+.vs/
+**/bin/
+**/obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build and packaging artifacts
+artifacts/
+publish/
+*.nupkg
+*.snupkg
+
+# Local logs and configuration
+*.log
+UserData/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

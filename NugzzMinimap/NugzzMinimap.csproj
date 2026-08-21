@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Nullable>disable</Nullable>
+    <RootNamespace>NugzzMinimap</RootNamespace>
+    <AssemblyName>NugzzMinimap</AssemblyName>
+    <Version>1.6.8</Version>
+    <Authors>XUnfairX/GrandmasAnkles</Authors>
+    <Description>A live HUD minimap and clock for Schedule I.</Description>
+    <RepositoryUrl>https://github.com/firebirdjsb/NugzzMinimap</RepositoryUrl>
+
+    <!-- Override on the command line when Schedule I is installed elsewhere:
+         dotnet build -p:ScheduleOnePath="D:\Games\Schedule I" -->
+    <ScheduleOnePath Condition="'$(ScheduleOnePath)' == '' and Exists('C:\Program Files (x86)\Steam\steamapps\common\Schedule I')">C:\Program Files (x86)\Steam\steamapps\common\Schedule I</ScheduleOnePath>
+    <ScheduleOnePath Condition="'$(ScheduleOnePath)' == '' and Exists('C:\Program Files\Steam\steamapps\common\Schedule I')">C:\Program Files\Steam\steamapps\common\Schedule I</ScheduleOnePath>
+    <MelonLoaderPath>$(ScheduleOnePath)\MelonLoader\net6</MelonLoaderPath>
+    <Il2CppAssembliesPath>$(ScheduleOnePath)\MelonLoader\Il2CppAssemblies</Il2CppAssembliesPath>
+  </PropertyGroup>
+
+  <Target Name="ValidateScheduleOnePath" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(ScheduleOnePath)' == ''" Text="Schedule I was not found. Pass -p:ScheduleOnePath=&quot;path to Schedule I&quot;." />
+    <Error Condition="'$(ScheduleOnePath)' != '' and !Exists('$(MelonLoaderPath)\MelonLoader.dll')" Text="MelonLoader net6 assemblies were not found below '$(ScheduleOnePath)'. Install/run MelonLoader first or correct ScheduleOnePath." />
+    <Error Condition="'$(ScheduleOnePath)' != '' and !Exists('$(Il2CppAssembliesPath)\Assembly-CSharp.dll')" Text="Generated IL2CPP assemblies were not found below '$(ScheduleOnePath)'. Run the game through MelonLoader once or correct ScheduleOnePath." />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="0Harmony" HintPath="$(MelonLoaderPath)\0Harmony.dll" Private="false" />
+    <Reference Include="Il2CppInterop.Runtime" HintPath="$(MelonLoaderPath)\Il2CppInterop.Runtime.dll" Private="false" />
+    <Reference Include="MelonLoader" HintPath="$(MelonLoaderPath)\MelonLoader.dll" Private="false" />
+
+    <Reference Include="Assembly-CSharp" HintPath="$(Il2CppAssembliesPath)\Assembly-CSharp.dll" Private="false" />
+    <Reference Include="Il2CppFishNet.Runtime" HintPath="$(Il2CppAssembliesPath)\Il2CppFishNet.Runtime.dll" Private="false" />
+    <Reference Include="Il2Cppmscorlib" HintPath="$(Il2CppAssembliesPath)\Il2Cppmscorlib.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(Il2CppAssembliesPath)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(Il2CppAssembliesPath)\UnityEngine.TextRenderingModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UI" HintPath="$(Il2CppAssembliesPath)\UnityEngine.UI.dll" Private="false" />
+    <Reference Include="UnityEngine.UIModule" HintPath="$(Il2CppAssembliesPath)\UnityEngine.UIModule.dll" Private="false" />
+  </ItemGroup>
+</Project>
