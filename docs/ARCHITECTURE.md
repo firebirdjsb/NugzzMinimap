@@ -6,18 +6,24 @@
 2. When the `Main` scene loads, `MinimapManager` creates one persistent manager and waits until both
    `Player.Local` and the phone `MapApp` are usable.
 3. `MinimapView` builds the overlay even when its initial enabled preference is false. It renders an
-   independent copy of `MapApp.BackgroundImage` and creates dedicated marker layers.
-4. Once per second, the view copies meaningful static place names from `MapApp.LabelGroup` and
-   discovers live `POI`, `NPC`, and `PoliceOfficer` objects. Every frame it converts world positions
-   with `MapPositionUtility`; dynamic location icons and NPC mugshots are read directly from game
-   objects rather than from phone-controlled UI visibility.
+   independent copy of `MapApp.BackgroundImage`, an embedded calibrated sewer-map crop, and
+   dedicated marker layers.
+4. Static place names and POIs are discovered once, then updated through `POI` lifecycle/text
+   patches. Once per second, the view walks the game's `NPCManager.NPCRegistry` and
+   `PoliceOfficer.Officers` lists without allocating scene-wide arrays. Every frame it converts
+   cached world positions with `MapPositionUtility`.
 5. `NPCButtonPatches` hides the HUD while `MapApp.SetOpen(true)` uses the untouched phone map and
-   resumes the HUD after `SetOpen(false)`.
+   resumes the HUD after `SetOpen(false)`. `MinimapView` also reconciles its latch with the native
+   `MapApp.opened` field every frame and on focus return, recovering if a focus transition bypasses
+   the Harmony close callback.
 6. NPC and police markers are HUD-owned only. The mod does not create, reparent, enable, or recolor
    native phone-map POIs, so opening the phone map remains independent.
 7. `Player.PlayerList` is read every frame to place named, directional markers for the local player
    and every connected lobby member.
-8. On scene exit or mod unload, the manager stops every coroutine, unsubscribes every preference
+8. Every 0.1 seconds, the game-owned `SewerCameraPresense` volume detector tests the local player's
+   position. Its result selects the calibrated sewer overlay regardless of which manhole, entrance,
+   or sewer door was used; leaving all sewer volumes restores the surface layer.
+9. On scene exit or mod unload, the manager stops every coroutine, unsubscribes every preference
    event, destroys generated textures/UI, and clears the static
    patch reference.
 
@@ -27,7 +33,7 @@
 | --- | --- | --- |
 | `Core` | Harmony instance | Unpatch on mod deinitialization. |
 | `MinimapManager` | Preferences, initialization coroutine, `MinimapView` | Stop initialization, unsubscribe events, destroy view. |
-| `MinimapView` | Canvas, generated mask sprites, and live marker dictionaries | Destroy canvas/sprites and clear references. |
+| `MinimapView` | Canvas, generated mask sprites, embedded sewer texture, and live marker dictionaries | Destroy canvas/sprites and clear references. |
 | `TimeDisplayView` | Clock GameObject and two generated panel sprites | Destroy UI and backing sprite textures. |
 | `MapApp` (game-owned) | Content tree, background, and live POI container | Never reparented, transformed, disabled, or destroyed by the mod. |
 
@@ -36,8 +42,10 @@
 | Coroutine | Interval | Purpose |
 | --- | ---: | --- |
 | Manager readiness | one frame | Wait for the player and phone map without calling `MapApp.Awake()` manually. |
-| Live marker discovery | 1 second | Rescan native place labels, locations, NPCs, and officers; add new markers and prune stale ones. |
+| Actor registry sync | 1 second | Walk the game's NPC/officer registries; add new markers and prune stale ones without a Unity scene scan. |
+| POI lifecycle patches | event-driven | Add, remove, or refresh location markers when their native POI changes. |
 | Marker positioning | every `LateUpdate` | Convert current world positions and update multiplayer directions. |
+| Sewer layer state | 0.1 seconds | Use the native sewer-volume test to switch map layers without scene scans. |
 
 The manager readiness coroutine is retained and stopped during cleanup. Continuous location/NPC
 tracking is handled by `LateUpdate`, so no infinite marker coroutine survives a scene change.
@@ -61,6 +69,10 @@ The main integration layer:
 
 - creates the screen-space canvas and minimap mask;
 - renders the native map sprite independently;
+- loads the supplied sewer graphic as an embedded resource and positions its crop using normalized
+  coordinates calibrated against the native 4096x4096 `Map_Full` street/building geometry;
+- places the sewer crop above surface-only labels/icons but below live player markers whenever the
+  native sewer detector contains the local player;
 - copies every meaningful `Text` below `MapApp.LabelGroup` into a dedicated HUD label layer using
   its native text, centered map-relative position, size, wrapping, font, alignment, and color;
 - compensates the native labels' `0.3` local scale against the HUD zoom so they render like the
@@ -69,23 +81,36 @@ The main integration layer:
   reads `lossyScale` or world matrices that can collapse while the phone app is closed;
 - resolves the native `LabelGroup` rectangle with `GetComponent<RectTransform>()`; IL2CPP component
   wrappers must not be converted with C# `as`, which returns null even for a native RectTransform;
-- discovers every active non-NPC `POI` and renders its native icon plus `MainText`/`DefaultMainText`;
+- discovers every active non-NPC `POI` once, then tracks lifecycle/text changes through Harmony;
 - identifies dead-drop POIs through their parent `DeadDrop` component and applies the independent
   `G_ShowDeadDropPOIs` preference during each location scan;
-- provides a clickable dead-drop HUD button whose managed callback updates the same preference and
-  saves the toggle category immediately;
+- applies `I_ShowMapText` live to player-name, native-building, mirrored-map, and location-label text
+  without disabling the associated player arrows, portraits, POI icons, or potential-customer areas;
+- applies `J_ShowLocationIcons` to house, business, and other generic location icons without changing
+  actor markers or the independently controlled dead-drop layer;
+- provides compact `DROPS`, `ICONS`, and `TEXT` HUD buttons, lower-corner zoom `-`/`+` controls, and
+  centered `ROTATE ON/OFF`; their managed callbacks update matching preferences and save the toggle
+  category immediately;
 - filters the uninitialized `PoI Main Text` prefab placeholder from all label sources;
-- discovers active NPCs directly and renders their native `MugshotSprite` at live world positions;
+- reads active NPCs and police from the game's registries and renders their native `MugshotSprite`;
 - keeps both the NPC portrait and its white backing disabled while `MugshotSprite` is null, avoiding
   stationary empty circles without suppressing an independent potential-customer area;
 - uses `Customer.potentialCustomerPoI.enabled` to show the native potential-customer state as a
   translucent purple area behind the portrait;
 - separates police into a dedicated layer with investigation/pursuit coloring;
 - follows the local player or current vehicle;
+- optionally rotates the common map content around the tracked player, uses the rotated offset to
+  keep that player centered, and counter-rotates labels and portrait markers so they remain upright;
 - maintains directional markers for every entry in the multiplayer `Player.PlayerList`;
 - filters every `Player.PoI` from the generic location layer to prevent duplicate player icons;
+- acquires the active `HintDisplay` singleton independently of notification events, captures its
+  native anchors, pivot, position, and `Offset`, then forces the whole panel onto the screen edge
+  opposite the minimap; writing both the native offset and container layout prevents the game's
+  animation/layout pass from returning it over the minimap, while the original values are restored
+  when the minimap hides;
 - maintains dictionaries keyed by Unity instance ID and prunes despawned objects;
-- centers and scales only the HUD content, leaving the native phone map's pan/zoom state untouched.
+- centers, scales, and optionally rotates only the HUD content, leaving the native phone map's
+  pan/zoom/orientation state untouched.
 
 ### `NugzzMinimap/Main/TimeDisplayView.cs`
 
@@ -130,7 +155,7 @@ MelonLoader game/mod metadata and repaired assembly version.
 - No infinite coroutine may be started without retaining its stop token.
 - Generated sprites own their textures; game sprites do not.
 - The map, markers, labels, and clock have raycasts disabled. The canvas raycaster exists solely for
-  the explicit dead-drop toggle button.
+  the explicit compact HUD controls.
 
 ## Confirmed repairs from the reconstructed source
 

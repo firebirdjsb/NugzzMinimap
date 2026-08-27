@@ -12,6 +12,7 @@ artifacts/
 publish/
 *.nupkg
 *.snupkg
+/NugzzMinimap.zip
 
 # Local logs and configuration
 *.log

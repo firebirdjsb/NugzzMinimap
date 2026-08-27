@@ -4,7 +4,7 @@ NugzzMinimap is a live HUD minimap for the IL2CPP build of **Schedule I**. It us
 map, building labels, location data, and character portraits while leaving the phone map available
 for normal use.
 
-Current version: **1.6.8**
+Current version: **1.6.22**
 
 Authors: **XUnfairX / GrandmasAnkles**
 
@@ -12,16 +12,24 @@ Authors: **XUnfairX / GrandmasAnkles**
 
 - Live circular or rounded-square minimap with configurable size, zoom, and position.
 - Native building and place labels matching the zoomed-in phone map.
+- Compact live controls for dead drops, house/business icons, and map text.
+- Clickable `-` and `+` controls for changing the saved minimap zoom level.
+- Optional player-oriented mode that rotates the map while keeping labels and portraits upright.
 - Live NPC portraits with empty portrait markers automatically suppressed.
 - Purple potential-customer areas based on the game's current customer state.
 - Police tracking with investigation and pursuit colors.
 - Directional markers for the local player and every connected multiplayer player.
 - House, business, and other native location icons.
-- Optional dead-drop POIs with a clickable `DEAD DROPS: ON/OFF` HUD button.
+- Optional dead-drop POIs with an independent clickable HUD control.
 - Configurable weekday and time display.
 - Automatic vehicle tracking when the local player enters a vehicle.
 - Non-interactive map graphics that do not block gameplay input.
 - Phone-map compatibility: the HUD hides while the map app is open and resumes afterward.
+- Focus-return recovery that prevents a missed phone-map close callback from leaving the HUD hidden.
+- An automatically aligned sewer layer that appears while the local player is inside any sewer
+  volume and returns to the surface map after leaving through a manhole, entrance, or door.
+- Allocation-free live actor discovery that avoids periodic scene-scan stutter.
+- Forced opposite-side placement that keeps dismissible game messages clear of the minimap.
 
 ## Requirements
 
@@ -43,7 +51,7 @@ Authors: **XUnfairX / GrandmasAnkles**
 5. Remove any older `BetterMinimap` or `NugzzMinimap` DLLs so only one copy is installed.
 6. Start the game through MelonLoader.
 
-MelonLoader should report `NugzzMinimap v1.6.8` during startup.
+MelonLoader should report `NugzzMinimap v1.6.22` during startup.
 
 ## Configuration
 
@@ -65,14 +73,20 @@ game is running.
 | `E_TrackNPCs` | `true` | Shows live NPC portraits and potential-customer areas. |
 | `F_TrackPolice` | `true` | Shows police locations and pursuit state. |
 | `G_ShowDeadDropPOIs` | `true` | Shows dead-drop names and icons. Also controlled by the HUD button. |
-| `H_MinimapZoom` | `7` | Sets map zoom from `1` through `10`. |
+| `H_MinimapZoom` | `7` | Sets map zoom from `1` through `10`. Also controlled by the `-` and `+` HUD buttons. |
+| `I_ShowMapText` | `true` | Shows player names, building names, and location labels. Also controlled by the HUD button. |
+| `J_ShowLocationIcons` | `true` | Shows house, business, and other location icons. Also controlled by the HUD button. |
+| `K_PlayerOrientedMap` | `false` | Rotates the minimap with the local player. Also controlled by `ROTATE ON/OFF`. |
 | `A_TimeDisplayTextColor` | `White` | Sets the clock text color. |
 | `B_TimeDisplayBackgroundOpacity` | `65` | Sets clock background opacity from `0` through `100`. |
 | `C_TimeDisplayTextSize` | `18` | Sets clock text size from `10` through `30`. |
 | Position settings | varies | Sets minimap and clock X/Y offsets. |
 
-The dead-drop button appears below the clock. Green means dead drops are enabled; red means they are
-hidden. Clicking it updates and saves `G_ShowDeadDropPOIs`.
+The compact `DROPS`, `ICONS`, and `TEXT` button row appears below the clock. Green means that layer is
+enabled and red means it is hidden. Every click updates and saves its matching preference. The
+`ICONS` control does not hide NPCs, police, players, potential-customer areas, or dead drops.
+The zoom `-` and `+` buttons sit at the minimap's lower-left and lower-right corners. The centered
+second row provides `ROTATE ON/OFF`; all three controls update the saved settings.
 
 ## Building from source
 
@@ -105,7 +119,7 @@ NugzzMinimap/bin/Release/net6.0/NugzzMinimap.dll
 - Confirm `NugzzMinimap.dll` is directly inside `Schedule I/Mods`.
 - Remove duplicate or older minimap DLLs.
 - Launch the game through MelonLoader.
-- Check the newest file in `Schedule I/MelonLoader/Logs` for `NugzzMinimap v1.6.8`.
+- Check the newest file in `Schedule I/MelonLoader/Logs` for `NugzzMinimap v1.6.22`.
 
 ### The project does not build
 
@@ -123,13 +137,14 @@ The mod adds missing settings automatically. To restore every default, close the
 - `NugzzMinimap/Core.cs` — MelonLoader entry point and scene lifecycle.
 - `NugzzMinimap/Main/MinimapManager.cs` — preferences and runtime coordination.
 - `NugzzMinimap/Main/MinimapView.cs` — map, markers, labels, clock placement, and HUD controls.
+- `NugzzMinimap/Assets/SewerMap.png` — calibrated sewer route layer embedded in the compiled DLL.
 - `NugzzMinimap/NPCSystem/NPCButtonPatches.cs` — phone-map Harmony integration.
 - `NugzzMinimap/Helpers` — preferences, UI state, colors, and generated sprite helpers.
 - `docs/ARCHITECTURE.md` — implementation details, ownership, and lifecycle invariants.
 
 ## Verification
 
-Version 1.6.8 builds in Debug and Release with zero compiler warnings or errors against the current
+Version 1.6.22 builds in Debug and Release with zero compiler warnings or errors against the current
 Schedule I and MelonLoader IL2CPP assemblies. Runtime behavior must be verified in the game because
 Schedule I does not provide a headless test environment.
 

@@ -1,6 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using NugzzMinimap.Helpers;
 using Il2CppInterop.Runtime.Attributes;
 using Il2CppScheduleOne.DevUtilities;
@@ -9,11 +11,13 @@ using Il2CppScheduleOne.Map;
 using Il2CppScheduleOne.NPCs;
 using Il2CppScheduleOne.PlayerScripts;
 using Il2CppScheduleOne.Police;
+using Il2CppScheduleOne.UI.Phone;
 using Il2CppScheduleOne.UI.Phone.Map;
 using MelonLoader;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using HintDisplay = Il2CppScheduleOne.UI.HintDisplay;
 
 namespace NugzzMinimap.Main;
 
@@ -25,11 +29,34 @@ namespace NugzzMinimap.Main;
 public sealed class MinimapView : MonoBehaviour
 {
     private const float VisualStateSyncInterval = 0.1f;
-    private const float LiveMarkerScanInterval = 1f;
+    private const float SewerStateSyncInterval = 0.1f;
+    private const float ActorRegistrySyncInterval = 1f;
     private const float NativeLabelReferenceZoom = 1.5f;
+    private const float HintScreenMargin = 24f;
+    private const float ToggleButtonWidth = 70f;
+    private const float ToggleButtonHeight = 22f;
+    private const float ToggleButtonSpacing = 73f;
+    private const float PrimaryButtonRowY = -48f;
+    private const float SecondaryButtonRowY = -73f;
+    private const float ZoomButtonWidth = 40f;
+    private const float OrientationButtonWidth = 124f;
+    private const string SewerMapResourceName = "NugzzMinimap.Assets.SewerMap.png";
+
+    // The supplied sewer graphic is a crop of the game's 4096x4096 Map_Full texture. These
+    // normalized values were calibrated from the unchanged street/building pixels, so it stays
+    // registered to MapPositionUtility at every HUD size and zoom level.
+    private const float SewerMapNormalizedWidth = 0.62997734f;
+    private const float SewerMapNormalizedHeight = 0.4116576f;
+    private const float SewerMapNormalizedCenterX = 0.008428379f;
+    private const float SewerMapNormalizedCenterY = 0.12910239f;
+    private const float SewerMapRotation = -0.02771966f;
 
     private static readonly Color PoliceBlue = new(0.2f, 0.4f, 1f, 1f);
     private static readonly Color PoliceRed = new(1f, 0.15f, 0.15f, 1f);
+    private static readonly Color ToggleEnabledColor = new(0.12f, 0.48f, 0.24f, 0.95f);
+    private static readonly Color ToggleDisabledColor = new(0.5f, 0.14f, 0.14f, 0.95f);
+    private static readonly Color ControlButtonColor = new(0.17f, 0.2f, 0.25f, 0.95f);
+    private static readonly Color DisabledControlButtonColor = new(0.12f, 0.12f, 0.12f, 0.75f);
 
     private readonly Dictionary<int, GameObject> npcPois = new();
     private readonly Dictionary<int, GameObject> policePois = new();
@@ -42,6 +69,7 @@ public sealed class MinimapView : MonoBehaviour
     private readonly Dictionary<int, RectTransform> playerMarkerRects = new();
     private readonly Dictionary<int, Image> playerMarkerImages = new();
     private readonly Dictionary<int, Text> playerMarkerLabels = new();
+    private readonly Dictionary<int, string> playerMarkerSourceNames = new();
     private readonly HashSet<int> livePlayerIds = new();
     private readonly List<int> stalePlayerIds = new();
     private readonly Dictionary<int, POI> livePoiSources = new();
@@ -51,10 +79,13 @@ public sealed class MinimapView : MonoBehaviour
     private readonly Dictionary<int, Image> livePoiMarkerIcons = new();
     private readonly Dictionary<int, Text> livePoiMarkerLabels = new();
     private readonly Dictionary<int, GameObject> liveBuildingLabelObjects = new();
+    private readonly Dictionary<int, Text> liveBuildingLabelSources = new();
     private readonly Dictionary<int, RectTransform> liveBuildingLabelRects = new();
+    private readonly Dictionary<int, Quaternion> liveBuildingLabelBaseRotations = new();
     private readonly Dictionary<int, Text> liveBuildingLabels = new();
     private readonly Dictionary<int, Shadow> liveBuildingLabelShadows = new();
     private readonly Dictionary<int, NPC> liveNpcSources = new();
+    private readonly Dictionary<int, Customer> liveCustomerSources = new();
     private readonly Dictionary<int, GameObject> liveNpcMarkers = new();
     private readonly Dictionary<int, RectTransform> liveNpcMarkerRects = new();
     private readonly Dictionary<int, Image> liveNpcPotentialCustomerCircles = new();
@@ -70,6 +101,7 @@ public sealed class MinimapView : MonoBehaviour
     private readonly HashSet<int> scannedNpcIds = new();
     private readonly HashSet<int> scannedPoliceIds = new();
     private readonly List<int> staleLiveMarkerIds = new();
+    private readonly Vector3[] minimapWorldCorners = new Vector3[4];
 
     private GameObject canvasGo;
     private GameObject mapContentContainer;
@@ -81,8 +113,30 @@ public sealed class MinimapView : MonoBehaviour
     private Button deadDropToggleButton;
     private Image deadDropToggleButtonImage;
     private Text deadDropToggleButtonText;
+    private Button locationIconToggleButton;
+    private Image locationIconToggleButtonImage;
+    private Text locationIconToggleButtonText;
+    private Button mapTextToggleButton;
+    private Image mapTextToggleButtonImage;
+    private Text mapTextToggleButtonText;
+    private Button zoomOutButton;
+    private Image zoomOutButtonImage;
+    private Button zoomInButton;
+    private Image zoomInButtonImage;
+    private Button playerOrientationToggleButton;
+    private Image playerOrientationToggleButtonImage;
+    private Text playerOrientationToggleButtonText;
     private Action<bool> deadDropPreferenceCallback;
+    private Action<bool> locationIconPreferenceCallback;
+    private Action<bool> mapTextPreferenceCallback;
+    private Action<int> zoomLevelPreferenceCallback;
+    private Action<bool> playerOrientationPreferenceCallback;
     private UnityAction deadDropToggleAction;
+    private UnityAction locationIconToggleAction;
+    private UnityAction mapTextToggleAction;
+    private UnityAction zoomOutAction;
+    private UnityAction zoomInAction;
+    private UnityAction playerOrientationToggleAction;
 
     private Transform playerTransform;
     private RectTransform mapContentRT;
@@ -92,6 +146,8 @@ public sealed class MinimapView : MonoBehaviour
     private GameObject mapMirrorRoot;
     private GameObject mapBackgroundMirror;
     private Image mapBackgroundImage;
+    private GameObject sewerMapLayer;
+    private Image sewerMapImage;
     private Transform mapLabelSourceRoot;
     private GameObject mapLabelMirrorRoot;
     private GameObject liveBuildingLabelLayer;
@@ -105,26 +161,51 @@ public sealed class MinimapView : MonoBehaviour
     private Sprite solidCircleSprite;
     private Sprite playerArrowSprite;
     private Sprite deadDropButtonSprite;
+    private Sprite sewerMapSprite;
 
     private GameObject selectedNpcPoi;
     private GameObject benjiPoITemplate;
     private bool npcTrackingEnabled = true;
     private bool policeTrackingEnabled = true;
     private bool deadDropPoisVisible = true;
+    private bool mapTextVisible = true;
+    private bool locationIconsVisible = true;
+    private bool playerOrientedMap;
     private bool npcPoisInitialized;
     private bool policePoisInitialized;
     private bool policeFlashState;
     private bool isMinimapEnabled = true;
     private bool mapAppOpen;
+    private bool isSewerMapActive;
+    private bool sewerStateInitialized;
     private bool cleanedUp;
     private float zoomScale = 0.7f;
+    private float currentMapRotation;
     private float nextVisualStateSyncTime;
     private float nextLiveMarkerScanTime;
+    private float nextSewerStateSyncTime;
+    private int zoomLevel = 7;
     private int lastLoggedPoiCount = -1;
     private int lastLoggedBuildingLabelCount = -1;
     private int lastLoggedNpcCount = -1;
     private int lastLoggedPoliceCount = -1;
     private int lastLoggedPotentialCustomerCount = -1;
+    private bool liveMarkerSummaryLogged;
+    private bool hintPlacementSummaryLogged;
+    private bool hintPlacementShifted;
+    private RectTransform shiftedHintContainer;
+    private HintDisplay hintDisplayInstance;
+    private HintDisplay shiftedHintDisplay;
+    private Vector2 hintNativeAnchorMin;
+    private Vector2 hintNativeAnchorMax;
+    private Vector2 hintNativePivot;
+    private Vector2 hintNativeAnchoredPosition;
+    private Vector2 hintNativeOffset;
+    private Vector2 hintAppliedAnchorMin;
+    private Vector2 hintAppliedAnchorMax;
+    private Vector2 hintAppliedPivot;
+    private Vector2 hintAppliedAnchoredPosition;
+    private Vector2 hintAppliedOffset;
 
     private object npcInitializationCoroutine;
     private object customerMonitorCoroutine;
@@ -143,6 +224,10 @@ public sealed class MinimapView : MonoBehaviour
         bool trackNPCs,
         bool trackPolice,
         bool showDeadDropPois,
+        bool showMapText,
+        bool showLocationIcons,
+        bool usePlayerOrientedMap,
+        int minimapZoomLevel,
         float minimapZoomScale,
         float positionX,
         float positionY,
@@ -151,7 +236,11 @@ public sealed class MinimapView : MonoBehaviour
         TimeDisplayColor timeDisplayColor,
         float timeDisplayBackgroundOpacity,
         int timeDisplayTextSize,
-        Action<bool> onDeadDropVisibilityChanged)
+        Action<bool> onDeadDropVisibilityChanged,
+        Action<bool> onLocationIconVisibilityChanged,
+        Action<bool> onMapTextVisibilityChanged,
+        Action<int> onZoomLevelChanged,
+        Action<bool> onPlayerOrientationChanged)
     {
         if (player == null || mapApp == null)
         {
@@ -160,12 +249,22 @@ public sealed class MinimapView : MonoBehaviour
         }
 
         cleanedUp = false;
+        liveMarkerSummaryLogged = false;
+        hintPlacementSummaryLogged = false;
         playerTransform = player.transform;
         mapAppInstance = mapApp;
         npcTrackingEnabled = trackNPCs;
         policeTrackingEnabled = trackPolice;
         deadDropPoisVisible = showDeadDropPois;
+        mapTextVisible = showMapText;
+        locationIconsVisible = showLocationIcons;
+        playerOrientedMap = usePlayerOrientedMap;
         deadDropPreferenceCallback = onDeadDropVisibilityChanged;
+        locationIconPreferenceCallback = onLocationIconVisibilityChanged;
+        mapTextPreferenceCallback = onMapTextVisibilityChanged;
+        zoomLevelPreferenceCallback = onZoomLevelChanged;
+        playerOrientationPreferenceCallback = onPlayerOrientationChanged;
+        zoomLevel = Mathf.Clamp(minimapZoomLevel, 1, 10);
         zoomScale = Mathf.Clamp(minimapZoomScale, 0.4f, 1f);
         isMinimapEnabled = minimapEnabled;
 
@@ -188,7 +287,7 @@ public sealed class MinimapView : MonoBehaviour
         LoadActualGameMap();
         SetStyle(!showSquareMinimap);
         nextLiveMarkerScanTime = 0f;
-        RefreshLiveMarkerSources();
+        RefreshAllMarkerSources();
         ToggleMinimapVisibility(minimapEnabled);
     }
 
@@ -200,6 +299,7 @@ public sealed class MinimapView : MonoBehaviour
         }
 
         cleanedUp = true;
+        RestoreHintPlacement();
         StopMelonCoroutine(ref npcInitializationCoroutine);
         StopMelonCoroutine(ref customerMonitorCoroutine);
         StopMelonCoroutine(ref policeInitializationCoroutine);
@@ -213,6 +313,31 @@ public sealed class MinimapView : MonoBehaviour
                 deadDropToggleButton.onClick.RemoveListener(deadDropToggleAction);
             }
 
+            if (locationIconToggleButton != null && locationIconToggleAction != null)
+            {
+                locationIconToggleButton.onClick.RemoveListener(locationIconToggleAction);
+            }
+
+            if (mapTextToggleButton != null && mapTextToggleAction != null)
+            {
+                mapTextToggleButton.onClick.RemoveListener(mapTextToggleAction);
+            }
+
+            if (zoomOutButton != null && zoomOutAction != null)
+            {
+                zoomOutButton.onClick.RemoveListener(zoomOutAction);
+            }
+
+            if (zoomInButton != null && zoomInAction != null)
+            {
+                zoomInButton.onClick.RemoveListener(zoomInAction);
+            }
+
+            if (playerOrientationToggleButton != null && playerOrientationToggleAction != null)
+            {
+                playerOrientationToggleButton.onClick.RemoveListener(playerOrientationToggleAction);
+            }
+
             UnityEngine.Object.Destroy(canvasGo);
             canvasGo = null;
         }
@@ -222,6 +347,7 @@ public sealed class MinimapView : MonoBehaviour
         DestroyGeneratedSprite(ref solidCircleSprite);
         DestroyGeneratedSprite(ref playerArrowSprite);
         DestroyGeneratedSprite(ref deadDropButtonSprite);
+        DestroyGeneratedSprite(ref sewerMapSprite);
 
         npcPois.Clear();
         policePois.Clear();
@@ -234,6 +360,7 @@ public sealed class MinimapView : MonoBehaviour
         playerMarkerRects.Clear();
         playerMarkerImages.Clear();
         playerMarkerLabels.Clear();
+        playerMarkerSourceNames.Clear();
         livePlayerIds.Clear();
         stalePlayerIds.Clear();
         livePoiSources.Clear();
@@ -243,10 +370,13 @@ public sealed class MinimapView : MonoBehaviour
         livePoiMarkerIcons.Clear();
         livePoiMarkerLabels.Clear();
         liveBuildingLabelObjects.Clear();
+        liveBuildingLabelSources.Clear();
         liveBuildingLabelRects.Clear();
+        liveBuildingLabelBaseRotations.Clear();
         liveBuildingLabels.Clear();
         liveBuildingLabelShadows.Clear();
         liveNpcSources.Clear();
+        liveCustomerSources.Clear();
         liveNpcMarkers.Clear();
         liveNpcMarkerRects.Clear();
         liveNpcPotentialCustomerCircles.Clear();
@@ -268,6 +398,8 @@ public sealed class MinimapView : MonoBehaviour
         mapMirrorRoot = null;
         mapBackgroundMirror = null;
         mapBackgroundImage = null;
+        sewerMapLayer = null;
+        sewerMapImage = null;
         mapLabelSourceRoot = null;
         mapLabelMirrorRoot = null;
         liveBuildingLabelLayer = null;
@@ -278,9 +410,34 @@ public sealed class MinimapView : MonoBehaviour
         deadDropToggleButton = null;
         deadDropToggleButtonImage = null;
         deadDropToggleButtonText = null;
+        locationIconToggleButton = null;
+        locationIconToggleButtonImage = null;
+        locationIconToggleButtonText = null;
+        mapTextToggleButton = null;
+        mapTextToggleButtonImage = null;
+        mapTextToggleButtonText = null;
+        zoomOutButton = null;
+        zoomOutButtonImage = null;
+        zoomInButton = null;
+        zoomInButtonImage = null;
+        playerOrientationToggleButton = null;
+        playerOrientationToggleButtonImage = null;
+        playerOrientationToggleButtonText = null;
         deadDropPreferenceCallback = null;
+        locationIconPreferenceCallback = null;
+        mapTextPreferenceCallback = null;
+        zoomLevelPreferenceCallback = null;
+        playerOrientationPreferenceCallback = null;
         deadDropToggleAction = null;
+        locationIconToggleAction = null;
+        mapTextToggleAction = null;
+        zoomOutAction = null;
+        zoomInAction = null;
+        playerOrientationToggleAction = null;
+        hintDisplayInstance = null;
         mapAppInstance = null;
+        isSewerMapActive = false;
+        sewerStateInitialized = false;
     }
 
     public void ToggleMinimapVisibility(bool isVisible)
@@ -314,6 +471,65 @@ public sealed class MinimapView : MonoBehaviour
     public void UpdateTimeDisplayColor(TimeDisplayColor color) => timeDisplayView?.UpdateColor(color);
     public void UpdateTimeDisplayBackgroundOpacity(float opacity) => timeDisplayView?.UpdateBackgroundOpacity(opacity);
     public void UpdateTimeDisplayTextSize(int textSize) => timeDisplayView?.UpdateTextSize(textSize);
+
+    public void UpdateMapTextVisibility(bool isVisible)
+    {
+        mapTextVisible = isVisible;
+        UpdateMapTextButtonVisual();
+        foreach (Text label in playerMarkerLabels.Values)
+        {
+            if (label != null)
+            {
+                label.enabled = isVisible;
+            }
+        }
+
+        foreach (Text label in liveBuildingLabels.Values)
+        {
+            if (label != null)
+            {
+                label.enabled = isVisible;
+            }
+        }
+
+        foreach (Shadow shadow in liveBuildingLabelShadows.Values)
+        {
+            if (shadow != null)
+            {
+                shadow.enabled = isVisible;
+            }
+        }
+
+        foreach (Text label in livePoiMarkerLabels.Values)
+        {
+            if (label != null)
+            {
+                label.enabled = isVisible && !string.IsNullOrWhiteSpace(label.text);
+            }
+        }
+
+        if (mapMirrorRoot != null)
+        {
+            SynchronizeMapMirror();
+        }
+    }
+
+    public void UpdateLocationIconVisibility(bool isVisible)
+    {
+        locationIconsVisible = isVisible;
+        UpdateLocationIconButtonVisual();
+        foreach (KeyValuePair<int, POI> pair in livePoiSources)
+        {
+            try
+            {
+                UpdateLocationMarkerVisual(pair.Key, pair.Value);
+            }
+            catch
+            {
+                // A location may be destroyed while its preference is being changed.
+            }
+        }
+    }
 
     public void UpdateNPCTracking(bool isVisible)
     {
@@ -355,20 +571,32 @@ public sealed class MinimapView : MonoBehaviour
         nextLiveMarkerScanTime = 0f;
         if (mapContentContainer != null)
         {
-            RefreshLiveMarkerSources();
+            ScanLiveLocations();
+            LogLiveMarkerCountsIfChanged();
         }
     }
 
-    public void UpdateZoomLevel(float newZoomScale)
+    public void UpdateZoomLevel(int newZoomLevel, float newZoomScale)
     {
+        zoomLevel = Mathf.Clamp(newZoomLevel, 1, 10);
         zoomScale = Mathf.Clamp(newZoomScale, 0.4f, 1f);
         if (mapContentRT != null)
         {
             mapContentRT.localScale = new Vector3(zoomScale, zoomScale, 1f);
         }
 
+        UpdateZoomButtonVisuals();
         nextLiveMarkerScanTime = 0f;
+        RefreshCachedBuildingLabels();
         CenterMapOnPlayer();
+    }
+
+    public void UpdatePlayerOrientedMap(bool isEnabled)
+    {
+        playerOrientedMap = isEnabled;
+        UpdatePlayerOrientationButtonVisual();
+        CenterMapOnPlayer();
+        UpdateUprightMarkerRotations();
     }
 
     public void UpdateMinimapPosition(float positionX, float positionY)
@@ -425,12 +653,28 @@ public sealed class MinimapView : MonoBehaviour
         UpdateCanvasVisibility();
     }
 
+    [HideFromIl2Cpp]
+    public void OnHintDisplayUpdated(HintDisplay hintDisplay)
+    {
+        if (!cleanedUp && hintDisplay != null)
+        {
+            hintDisplayInstance = hintDisplay;
+        }
+    }
+
     public void OnMapAppClosed()
+    {
+        CompleteMapAppClose();
+    }
+
+    private void CompleteMapAppClose()
     {
         mapAppOpen = false;
         nextVisualStateSyncTime = 0f;
         SynchronizeBackgroundMirror();
         nextLiveMarkerScanTime = 0f;
+        RefreshCachedBuildingLabels();
+        RefreshLiveMarkerSources();
         UpdateCanvasVisibility();
         SetStyle(MinimapState.IsCircleMode);
     }
@@ -455,13 +699,20 @@ public sealed class MinimapView : MonoBehaviour
 
     private void LateUpdate()
     {
+        SynchronizeMapAppState();
         UpdateCanvasVisibility();
+        UpdateHintPlacementSafely();
+        Player player = Player.Local;
+        if (player != null)
+        {
+            SynchronizeSewerMapState(player);
+        }
+
         if (!isMinimapEnabled || mapAppOpen || Time.timeScale == 0f || mapContentContainer == null)
         {
             return;
         }
 
-        Player player = Player.Local;
         if (player == null)
         {
             return;
@@ -476,15 +727,95 @@ public sealed class MinimapView : MonoBehaviour
             playerTransform = player.transform;
         }
 
-        SynchronizeBackgroundMirror();
+        if (Time.unscaledTime >= nextVisualStateSyncTime)
+        {
+            nextVisualStateSyncTime = Time.unscaledTime + VisualStateSyncInterval;
+            SynchronizeBackgroundMirror();
+        }
+
+        CenterMapOnPlayer();
         UpdateLiveMapMarkers();
         UpdatePlayerMarkers();
-        CenterMapOnPlayer();
+        if (playerOrientedMap)
+        {
+            UpdateUprightMarkerRotations();
+        }
+    }
+
+    private void OnApplicationFocus(bool hasFocus)
+    {
+        if (!hasFocus || cleanedUp)
+        {
+            return;
+        }
+
+        // A focus-loss phone transition can bypass the Harmony close callback. Re-read the native
+        // MapApp state immediately on return; LateUpdate keeps reconciling it afterward.
+        SynchronizeMapAppState();
+        UpdateCanvasVisibility();
+    }
+
+    private void UpdateHintPlacementSafely()
+    {
+        try
+        {
+            UpdateHintPlacement();
+        }
+        catch
+        {
+            // HUD objects are rebuilt during scene transitions. Never let a transient or
+            // unsupported IL2CPP UI call escape LateUpdate and flood the MelonLoader log.
+            hintDisplayInstance = null;
+            try
+            {
+                RestoreHintPlacement();
+            }
+            catch
+            {
+                hintPlacementShifted = false;
+                shiftedHintContainer = null;
+            }
+        }
     }
 
     private void OnDestroy()
     {
         Cleanup();
+    }
+
+    private void SynchronizeMapAppState()
+    {
+        try
+        {
+            if (mapAppInstance == null)
+            {
+                return;
+            }
+
+            bool nativeMapOpen = mapAppInstance.opened;
+            if (nativeMapOpen && PlayerSingleton<Phone>.InstanceExists)
+            {
+                Phone phone = PlayerSingleton<Phone>.Instance;
+                nativeMapOpen = phone != null && phone.IsOpen;
+            }
+            if (nativeMapOpen == mapAppOpen)
+            {
+                return;
+            }
+
+            if (nativeMapOpen)
+            {
+                mapAppOpen = true;
+                return;
+            }
+
+            CompleteMapAppClose();
+        }
+        catch
+        {
+            // Native wrappers can be replaced during a scene or network transition. Keep the last
+            // confirmed state until the next frame instead of forcing the HUD into the wrong state.
+        }
     }
 
     private void UpdateCanvasVisibility()
@@ -499,6 +830,144 @@ public sealed class MinimapView : MonoBehaviour
         {
             canvasGo.SetActive(shouldBeActive);
         }
+    }
+
+    private void UpdateHintPlacement()
+    {
+        HintDisplay hintDisplay = hintDisplayInstance;
+        if (hintDisplay == null)
+        {
+            try
+            {
+                hintDisplay = Singleton<HintDisplay>.Instance;
+                hintDisplayInstance = hintDisplay;
+            }
+            catch
+            {
+                // The HUD singleton may not exist until the playable scene is fully initialized.
+            }
+        }
+
+        if (hintDisplay == null)
+        {
+            RestoreHintPlacement();
+            return;
+        }
+
+        RectTransform currentHintContainer;
+        try
+        {
+            currentHintContainer = hintDisplay?.Container;
+        }
+        catch
+        {
+            hintDisplayInstance = null;
+            RestoreHintPlacement();
+            return;
+        }
+        if (currentHintContainer != shiftedHintContainer || hintDisplay != shiftedHintDisplay)
+        {
+            RestoreHintPlacement();
+            shiftedHintContainer = currentHintContainer;
+            shiftedHintDisplay = hintDisplay;
+        }
+
+        if (currentHintContainer == null)
+        {
+            return;
+        }
+
+        bool minimapVisible = isMinimapEnabled && !mapAppOpen && Time.timeScale != 0f
+            && canvasGo != null && canvasGo.activeInHierarchy && containerRT != null;
+        if (!minimapVisible)
+        {
+            RestoreHintPlacement();
+            return;
+        }
+
+        if (!hintPlacementShifted)
+        {
+            hintNativeAnchorMin = currentHintContainer.anchorMin;
+            hintNativeAnchorMax = currentHintContainer.anchorMax;
+            hintNativePivot = currentHintContainer.pivot;
+            hintNativeAnchoredPosition = currentHintContainer.anchoredPosition;
+            hintNativeOffset = hintDisplay.Offset;
+        }
+
+        containerRT.GetWorldCorners(minimapWorldCorners);
+        Rect minimapRect = GetWorldRect(minimapWorldCorners);
+        float localToScreenScale = Mathf.Max(0.01f, Mathf.Abs(currentHintContainer.lossyScale.x));
+        bool minimapIsOnRight = minimapRect.center.x >= Screen.width * 0.5f;
+        float oppositeAnchorX = minimapIsOnRight ? 0f : 1f;
+        float oppositePivotX = minimapIsOnRight ? 0f : 1f;
+        float horizontalMargin = (minimapIsOnRight ? HintScreenMargin : -HintScreenMargin)
+            / localToScreenScale;
+
+        hintAppliedAnchorMin = new Vector2(oppositeAnchorX, hintNativeAnchorMin.y);
+        hintAppliedAnchorMax = new Vector2(oppositeAnchorX, hintNativeAnchorMax.y);
+        hintAppliedPivot = new Vector2(oppositePivotX, hintNativePivot.y);
+        hintAppliedAnchoredPosition = new Vector2(horizontalMargin, currentHintContainer.anchoredPosition.y);
+        hintAppliedOffset = new Vector2(horizontalMargin, hintNativeOffset.y);
+
+        // HintDisplay.Update uses its Offset field while animations/layout can also write directly
+        // to Container. Force both inputs, and anchor the panel to the opposite screen edge so a
+        // late layout rebuild cannot put it back over the minimap.
+        hintDisplay.Offset = hintAppliedOffset;
+        currentHintContainer.anchorMin = hintAppliedAnchorMin;
+        currentHintContainer.anchorMax = hintAppliedAnchorMax;
+        currentHintContainer.pivot = hintAppliedPivot;
+        if (!Approximately(currentHintContainer.anchoredPosition, hintAppliedAnchoredPosition))
+        {
+            currentHintContainer.anchoredPosition = hintAppliedAnchoredPosition;
+        }
+
+        hintPlacementShifted = true;
+        if (!hintPlacementSummaryLogged)
+        {
+            hintPlacementSummaryLogged = true;
+            string side = minimapIsOnRight ? "left" : "right";
+            MelonLogger.Msg($"NugzzMinimap notification panel anchored to the screen's {side} side.");
+        }
+    }
+
+    private void RestoreHintPlacement()
+    {
+        if (hintPlacementShifted)
+        {
+            try
+            {
+                if (shiftedHintDisplay != null)
+                {
+                    shiftedHintDisplay.Offset = hintNativeOffset;
+                }
+
+                if (shiftedHintContainer != null)
+                {
+                    shiftedHintContainer.anchorMin = hintNativeAnchorMin;
+                    shiftedHintContainer.anchorMax = hintNativeAnchorMax;
+                    shiftedHintContainer.pivot = hintNativePivot;
+                    shiftedHintContainer.anchoredPosition = hintNativeAnchoredPosition;
+                }
+            }
+            catch
+            {
+                // The native HUD may be destroyed before the mod's scene cleanup runs.
+            }
+        }
+
+        hintPlacementShifted = false;
+        shiftedHintContainer = null;
+        shiftedHintDisplay = null;
+    }
+
+    private static Rect GetWorldRect(Vector3[] corners)
+    {
+        return Rect.MinMaxRect(corners[0].x, corners[0].y, corners[2].x, corners[2].y);
+    }
+
+    private static bool Approximately(Vector2 left, Vector2 right)
+    {
+        return Mathf.Approximately(left.x, right.x) && Mathf.Approximately(left.y, right.y);
     }
 
     private void CreateGeneratedSprites()
@@ -581,6 +1050,8 @@ public sealed class MinimapView : MonoBehaviour
         mapContentRT.localScale = new Vector3(zoomScale, zoomScale, 1f);
         nextVisualStateSyncTime = 0f;
 
+        CreateSewerMapLayer();
+
         liveBuildingLabelLayer = CreateMapLayer("NugzzMinimapBuildingLabels", mapContentContainer.transform);
         livePoiMarkerLayer = CreateMapLayer("NugzzMinimapLocations", mapContentContainer.transform);
         liveNpcMarkerLayer = CreateMapLayer("NugzzMinimapNPCs", mapContentContainer.transform);
@@ -604,58 +1075,177 @@ public sealed class MinimapView : MonoBehaviour
             timeDisplayBackgroundOpacity,
             timeDisplayTextSize);
 
-        CreateDeadDropToggleButton();
+        CreateToggleButtons();
     }
 
     [HideFromIl2Cpp]
-    private void CreateDeadDropToggleButton()
+    private void CreateToggleButtons()
     {
         if (containerRT == null)
         {
             return;
         }
 
-        GameObject buttonObject = new("DeadDropToggleButton");
+        CreateCompactToggleButton(
+            "DeadDropToggleButton",
+            -ToggleButtonSpacing,
+            PrimaryButtonRowY,
+            ToggleButtonWidth,
+            9,
+            new Action(ToggleDeadDropsFromButton),
+            out deadDropToggleButton,
+            out deadDropToggleButtonImage,
+            out deadDropToggleButtonText,
+            out deadDropToggleAction);
+        CreateCompactToggleButton(
+            "LocationIconToggleButton",
+            0f,
+            PrimaryButtonRowY,
+            ToggleButtonWidth,
+            9,
+            new Action(ToggleLocationIconsFromButton),
+            out locationIconToggleButton,
+            out locationIconToggleButtonImage,
+            out locationIconToggleButtonText,
+            out locationIconToggleAction);
+        CreateCompactToggleButton(
+            "MapTextToggleButton",
+            ToggleButtonSpacing,
+            PrimaryButtonRowY,
+            ToggleButtonWidth,
+            9,
+            new Action(ToggleMapTextFromButton),
+            out mapTextToggleButton,
+            out mapTextToggleButtonImage,
+            out mapTextToggleButtonText,
+            out mapTextToggleAction);
+        CreateCompactToggleButton(
+            "ZoomOutButton",
+            -85f,
+            SecondaryButtonRowY,
+            ZoomButtonWidth,
+            16,
+            new Action(ZoomOutFromButton),
+            out zoomOutButton,
+            out zoomOutButtonImage,
+            out _,
+            out zoomOutAction);
+        CreateCompactToggleButton(
+            "ZoomInButton",
+            -42f,
+            SecondaryButtonRowY,
+            ZoomButtonWidth,
+            16,
+            new Action(ZoomInFromButton),
+            out zoomInButton,
+            out zoomInButtonImage,
+            out _,
+            out zoomInAction);
+        CreateCompactToggleButton(
+            "PlayerOrientationToggleButton",
+            0f,
+            SecondaryButtonRowY,
+            OrientationButtonWidth,
+            9,
+            new Action(TogglePlayerOrientationFromButton),
+            out playerOrientationToggleButton,
+            out playerOrientationToggleButtonImage,
+            out playerOrientationToggleButtonText,
+            out playerOrientationToggleAction);
+
+        SetButtonText(zoomOutButton, "-");
+        SetButtonText(zoomInButton, "+");
+        PositionZoomButton(zoomOutButton, new Vector2(0.18f, 0.12f));
+        PositionZoomButton(zoomInButton, new Vector2(0.82f, 0.12f));
+
+        UpdateDeadDropButtonVisual();
+        UpdateLocationIconButtonVisual();
+        UpdateMapTextButtonVisual();
+        UpdateZoomButtonVisuals();
+        UpdatePlayerOrientationButtonVisual();
+    }
+
+    [HideFromIl2Cpp]
+    private void CreateCompactToggleButton(
+        string objectName,
+        float positionX,
+        float positionY,
+        float buttonWidth,
+        int fontSize,
+        Action callback,
+        out Button button,
+        out Image buttonImage,
+        out Text buttonText,
+        out UnityAction toggleAction)
+    {
+        GameObject buttonObject = new(objectName);
         buttonObject.transform.SetParent(containerRT, false);
         RectTransform buttonRect = buttonObject.AddComponent<RectTransform>();
         buttonRect.anchorMin = new Vector2(0.5f, 0f);
         buttonRect.anchorMax = new Vector2(0.5f, 0f);
         buttonRect.pivot = new Vector2(0.5f, 1f);
-        buttonRect.anchoredPosition = new Vector2(0f, -48f);
-        buttonRect.sizeDelta = new Vector2(132f, 28f);
+        buttonRect.anchoredPosition = new Vector2(positionX, positionY);
+        buttonRect.sizeDelta = new Vector2(buttonWidth, ToggleButtonHeight);
 
-        deadDropToggleButtonImage = buttonObject.AddComponent<Image>();
-        deadDropButtonSprite ??= Utils.CreateRoundedRectSprite(132, 28, 6f, Color.white);
-        deadDropToggleButtonImage.sprite = deadDropButtonSprite;
-        deadDropToggleButtonImage.raycastTarget = true;
+        buttonImage = buttonObject.AddComponent<Image>();
+        deadDropButtonSprite ??= Utils.CreateRoundedRectSprite(
+            (int)ToggleButtonWidth,
+            (int)ToggleButtonHeight,
+            5f,
+            Color.white);
+        buttonImage.sprite = deadDropButtonSprite;
+        buttonImage.color = ControlButtonColor;
+        buttonImage.raycastTarget = true;
 
-        deadDropToggleButton = buttonObject.AddComponent<Button>();
-        deadDropToggleButton.targetGraphic = deadDropToggleButtonImage;
-        deadDropToggleButton.transition = Selectable.Transition.None;
-        Navigation navigation = deadDropToggleButton.navigation;
+        button = buttonObject.AddComponent<Button>();
+        button.targetGraphic = buttonImage;
+        button.transition = Selectable.Transition.None;
+        Navigation navigation = button.navigation;
         navigation.mode = Navigation.Mode.None;
-        deadDropToggleButton.navigation = navigation;
+        button.navigation = navigation;
 
         GameObject textObject = new("Label");
         textObject.transform.SetParent(buttonRect, false);
         RectTransform textRect = textObject.AddComponent<RectTransform>();
-        StretchToParent(textRect, 2f, -2f);
-        deadDropToggleButtonText = textObject.AddComponent<Text>();
-        deadDropToggleButtonText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        deadDropToggleButtonText.fontSize = 11;
-        deadDropToggleButtonText.fontStyle = FontStyle.Bold;
-        deadDropToggleButtonText.alignment = TextAnchor.MiddleCenter;
-        deadDropToggleButtonText.color = Color.white;
-        deadDropToggleButtonText.raycastTarget = false;
+        StretchToParent(textRect, 1f, -1f);
+        buttonText = textObject.AddComponent<Text>();
+        buttonText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        buttonText.fontSize = fontSize;
+        buttonText.fontStyle = FontStyle.Bold;
+        buttonText.alignment = TextAnchor.MiddleCenter;
+        buttonText.color = Color.white;
+        buttonText.horizontalOverflow = HorizontalWrapMode.Overflow;
+        buttonText.raycastTarget = false;
         Outline outline = textObject.AddComponent<Outline>();
         outline.effectColor = new Color(0f, 0f, 0f, 0.9f);
         outline.effectDistance = new Vector2(1f, -1f);
 
-        deadDropToggleAction = Il2CppInterop.Runtime.DelegateSupport.ConvertDelegate<UnityAction>(
-            new Action(ToggleDeadDropsFromButton));
-        deadDropToggleButton.onClick.AddListener(deadDropToggleAction);
-        UpdateDeadDropButtonVisual();
+        toggleAction = Il2CppInterop.Runtime.DelegateSupport.ConvertDelegate<UnityAction>(callback);
+        button.onClick.AddListener(toggleAction);
         buttonObject.transform.SetAsLastSibling();
+    }
+
+    private static void SetButtonText(Button button, string value)
+    {
+        Text label = button?.GetComponentInChildren<Text>(true);
+        if (label != null)
+        {
+            label.text = value;
+        }
+    }
+
+    private static void PositionZoomButton(Button button, Vector2 anchor)
+    {
+        RectTransform buttonRect = button?.GetComponent<RectTransform>();
+        if (buttonRect == null)
+        {
+            return;
+        }
+
+        buttonRect.anchorMin = anchor;
+        buttonRect.anchorMax = anchor;
+        buttonRect.pivot = new Vector2(0.5f, 0.5f);
+        buttonRect.anchoredPosition = Vector2.zero;
     }
 
     [HideFromIl2Cpp]
@@ -666,18 +1256,125 @@ public sealed class MinimapView : MonoBehaviour
         deadDropPreferenceCallback?.Invoke(newVisibility);
     }
 
-    private void UpdateDeadDropButtonVisual()
+    [HideFromIl2Cpp]
+    private void ToggleLocationIconsFromButton()
     {
-        if (deadDropToggleButtonText != null)
+        bool newVisibility = !locationIconsVisible;
+        UpdateLocationIconVisibility(newVisibility);
+        locationIconPreferenceCallback?.Invoke(newVisibility);
+    }
+
+    [HideFromIl2Cpp]
+    private void ToggleMapTextFromButton()
+    {
+        bool newVisibility = !mapTextVisible;
+        UpdateMapTextVisibility(newVisibility);
+        mapTextPreferenceCallback?.Invoke(newVisibility);
+    }
+
+    [HideFromIl2Cpp]
+    private void ZoomOutFromButton()
+    {
+        AdjustZoom(-1);
+    }
+
+    [HideFromIl2Cpp]
+    private void ZoomInFromButton()
+    {
+        AdjustZoom(1);
+    }
+
+    private void AdjustZoom(int change)
+    {
+        int newZoomLevel = Mathf.Clamp(zoomLevel + change, 1, 10);
+        if (newZoomLevel == zoomLevel)
         {
-            deadDropToggleButtonText.text = deadDropPoisVisible ? "DEAD DROPS: ON" : "DEAD DROPS: OFF";
+            return;
         }
 
-        if (deadDropToggleButtonImage != null)
+        UpdateZoomLevel(newZoomLevel, MapPreferences.GetMinimapZoomScale(newZoomLevel));
+        zoomLevelPreferenceCallback?.Invoke(newZoomLevel);
+    }
+
+    [HideFromIl2Cpp]
+    private void TogglePlayerOrientationFromButton()
+    {
+        bool newValue = !playerOrientedMap;
+        UpdatePlayerOrientedMap(newValue);
+        playerOrientationPreferenceCallback?.Invoke(newValue);
+    }
+
+    private void UpdateDeadDropButtonVisual()
+    {
+        UpdateToggleButtonVisual(
+            deadDropToggleButtonImage,
+            deadDropToggleButtonText,
+            "DROPS",
+            deadDropPoisVisible);
+    }
+
+    private void UpdateLocationIconButtonVisual()
+    {
+        UpdateToggleButtonVisual(
+            locationIconToggleButtonImage,
+            locationIconToggleButtonText,
+            "ICONS",
+            locationIconsVisible);
+    }
+
+    private void UpdateMapTextButtonVisual()
+    {
+        UpdateToggleButtonVisual(
+            mapTextToggleButtonImage,
+            mapTextToggleButtonText,
+            "TEXT",
+            mapTextVisible);
+    }
+
+    private void UpdateZoomButtonVisuals()
+    {
+        bool canZoomOut = zoomLevel > 1;
+        bool canZoomIn = zoomLevel < 10;
+        if (zoomOutButton != null)
         {
-            deadDropToggleButtonImage.color = deadDropPoisVisible
-                ? new Color(0.12f, 0.48f, 0.24f, 0.95f)
-                : new Color(0.5f, 0.14f, 0.14f, 0.95f);
+            zoomOutButton.interactable = canZoomOut;
+        }
+
+        if (zoomInButton != null)
+        {
+            zoomInButton.interactable = canZoomIn;
+        }
+
+        if (zoomOutButtonImage != null)
+        {
+            zoomOutButtonImage.color = canZoomOut ? ControlButtonColor : DisabledControlButtonColor;
+        }
+
+        if (zoomInButtonImage != null)
+        {
+            zoomInButtonImage.color = canZoomIn ? ControlButtonColor : DisabledControlButtonColor;
+        }
+    }
+
+    private void UpdatePlayerOrientationButtonVisual()
+    {
+        UpdateToggleButtonVisual(
+            playerOrientationToggleButtonImage,
+            playerOrientationToggleButtonText,
+            "ROTATE",
+            playerOrientedMap);
+    }
+
+    private static void UpdateToggleButtonVisual(Image buttonImage, Text buttonText, string label, bool isEnabled)
+    {
+        if (buttonText != null)
+        {
+            buttonText.text = $"{label} {(isEnabled ? "ON" : "OFF")}";
+        }
+
+        if (buttonImage != null)
+        {
+            buttonImage.color = isEnabled ? ToggleEnabledColor : ToggleDisabledColor;
         }
     }
 
@@ -697,7 +1394,7 @@ public sealed class MinimapView : MonoBehaviour
             livePoiMarkerLayer?.transform.SetAsLastSibling();
             liveNpcMarkerLayer?.transform.SetAsLastSibling();
             livePoliceMarkerLayer?.transform.SetAsLastSibling();
-            playerMarkerLayer?.transform.SetAsLastSibling();
+            ApplyMapLayerOrder();
             MelonLogger.Msg(
                 $"NugzzMinimap live map background ready (map sprite: " +
                 $"{(mapBackgroundImage?.sprite != null ? "loaded" : "missing")}).");
@@ -757,7 +1454,7 @@ public sealed class MinimapView : MonoBehaviour
         mirrorRect.sizeDelta = sourceRoot.sizeDelta;
         CreateLabelMirror(sourceRoot);
         mapMirrorRoot.transform.SetAsLastSibling();
-        playerMarkerLayer?.transform.SetAsLastSibling();
+        ApplyMapLayerOrder();
         mapContentRT.sizeDelta = GetMapDimensions();
         mapContentRT.localScale = new Vector3(zoomScale, zoomScale, 1f);
         nextVisualStateSyncTime = 0f;
@@ -840,6 +1537,148 @@ public sealed class MinimapView : MonoBehaviour
         SynchronizeBackgroundMirror();
     }
 
+    private void CreateSewerMapLayer()
+    {
+        if (mapContentContainer == null || sewerMapLayer != null)
+        {
+            return;
+        }
+
+        try
+        {
+            using Stream stream = typeof(MinimapView).Assembly.GetManifestResourceStream(SewerMapResourceName);
+            if (stream == null)
+            {
+                throw new InvalidOperationException($"Embedded resource '{SewerMapResourceName}' was not found.");
+            }
+
+            using BinaryReader reader = new(stream);
+            byte[] pngBytes = reader.ReadBytes(checked((int)stream.Length));
+            Texture2D texture = new(2, 2, TextureFormat.RGBA32, false)
+            {
+                name = "NugzzMinimapSewerMapTexture",
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            Il2CppStructArray<byte> nativeBytes = new(pngBytes);
+            if (!texture.LoadImage(nativeBytes, true))
+            {
+                UnityEngine.Object.Destroy(texture);
+                throw new InvalidOperationException("Unity could not decode the embedded sewer map PNG.");
+            }
+
+            sewerMapSprite = Sprite.Create(
+                texture,
+                new Rect(0f, 0f, texture.width, texture.height),
+                new Vector2(0.5f, 0.5f),
+                100f);
+            sewerMapSprite.name = "NugzzMinimapSewerMapSprite";
+
+            sewerMapLayer = new GameObject("NugzzMinimapSewerLayer");
+            sewerMapLayer.transform.SetParent(mapContentContainer.transform, false);
+            RectTransform sewerRect = sewerMapLayer.AddComponent<RectTransform>();
+            sewerRect.anchorMin = new Vector2(0.5f, 0.5f);
+            sewerRect.anchorMax = new Vector2(0.5f, 0.5f);
+            sewerRect.pivot = new Vector2(0.5f, 0.5f);
+
+            sewerMapImage = sewerMapLayer.AddComponent<Image>();
+            sewerMapImage.sprite = sewerMapSprite;
+            sewerMapImage.color = Color.white;
+            sewerMapImage.material = null;
+            sewerMapImage.preserveAspect = false;
+            sewerMapImage.raycastTarget = false;
+            UpdateSewerMapRect();
+            sewerMapLayer.SetActive(false);
+            MelonLogger.Msg("NugzzMinimap calibrated sewer map layer loaded.");
+        }
+        catch (Exception exception)
+        {
+            MelonLogger.Error($"NugzzMinimap could not load the sewer map layer: {exception}");
+            if (sewerMapLayer != null)
+            {
+                UnityEngine.Object.Destroy(sewerMapLayer);
+                sewerMapLayer = null;
+                sewerMapImage = null;
+            }
+
+            DestroyGeneratedSprite(ref sewerMapSprite);
+        }
+    }
+
+    private void UpdateSewerMapRect()
+    {
+        RectTransform sewerRect = sewerMapLayer?.GetComponent<RectTransform>();
+        if (sewerRect == null)
+        {
+            return;
+        }
+
+        Vector2 mapDimensions = GetMapDimensions();
+        sewerRect.sizeDelta = new Vector2(
+            mapDimensions.x * SewerMapNormalizedWidth,
+            mapDimensions.y * SewerMapNormalizedHeight);
+        sewerRect.anchoredPosition = new Vector2(
+            mapDimensions.x * SewerMapNormalizedCenterX,
+            mapDimensions.y * SewerMapNormalizedCenterY);
+        sewerRect.localScale = Vector3.one;
+        sewerRect.localRotation = Quaternion.Euler(0f, 0f, SewerMapRotation);
+    }
+
+    private void ApplyMapLayerOrder()
+    {
+        mapBackgroundMirror?.transform.SetAsFirstSibling();
+        // While active, the sewer crop covers every surface-only label/icon. Multiplayer/player
+        // arrows remain above it, preserving live tracking without mixing in surface POIs.
+        sewerMapLayer?.transform.SetAsLastSibling();
+        playerMarkerLayer?.transform.SetAsLastSibling();
+    }
+
+    private void SynchronizeSewerMapState(Player player)
+    {
+        if (player == null || Time.unscaledTime < nextSewerStateSyncTime)
+        {
+            return;
+        }
+
+        nextSewerStateSyncTime = Time.unscaledTime + SewerStateSyncInterval;
+        try
+        {
+            SewerCameraPresense sewerPresence = Singleton<SewerCameraPresense>.Instance;
+            if (sewerPresence == null || player.transform == null)
+            {
+                return;
+            }
+
+            SetSewerMapActive(sewerPresence.IsPointInSewerArea(player.transform.position));
+        }
+        catch
+        {
+            // Retain the last confirmed layer during transient scene/network wrapper replacement.
+        }
+    }
+
+    private void SetSewerMapActive(bool isActive)
+    {
+        bool changed = !sewerStateInitialized || isSewerMapActive != isActive;
+        sewerStateInitialized = true;
+        isSewerMapActive = isActive;
+        if (sewerMapLayer != null && sewerMapLayer.activeSelf != isActive)
+        {
+            sewerMapLayer.SetActive(isActive);
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        ApplyMapLayerOrder();
+        if (isActive)
+        {
+            MelonLogger.Msg("NugzzMinimap switched to the sewer map layer.");
+        }
+    }
+
     private void SynchronizeBackgroundMirror()
     {
         Image sourceImage = mapAppInstance?.BackgroundImage;
@@ -864,6 +1703,8 @@ public sealed class MinimapView : MonoBehaviour
         {
             backgroundRect.sizeDelta = GetMapDimensions();
         }
+
+        UpdateSewerMapRect();
     }
 
     private Vector2 GetMapDimensions()
@@ -1024,7 +1865,7 @@ public sealed class MinimapView : MonoBehaviour
         return mirror;
     }
 
-    private static void CreateVisualComponents(GameObject source, GameObject mirror)
+    private void CreateVisualComponents(GameObject source, GameObject mirror)
     {
         if (source.GetComponent<Image>() != null)
         {
@@ -1136,7 +1977,7 @@ public sealed class MinimapView : MonoBehaviour
         }
     }
 
-    private static void CopyMutableVisualState(GameObject source, GameObject mirror, bool forceVisible)
+    private void CopyMutableVisualState(GameObject source, GameObject mirror, bool forceVisible)
     {
         Image sourceImage = source.GetComponent<Image>();
         Image mirrorImage = mirror.GetComponent<Image>();
@@ -1175,7 +2016,7 @@ public sealed class MinimapView : MonoBehaviour
         Text mirrorText = mirror.GetComponent<Text>();
         if (sourceText != null && mirrorText != null)
         {
-            mirrorText.enabled = forceVisible || sourceText.enabled;
+            mirrorText.enabled = mapTextVisible && (forceVisible || sourceText.enabled);
             mirrorText.text = sourceText.text;
             mirrorText.font = sourceText.font;
             mirrorText.fontSize = sourceText.fontSize;
@@ -1226,13 +2067,68 @@ public sealed class MinimapView : MonoBehaviour
             if (mapUtility != null)
             {
                 Vector2 mapPosition = mapUtility.GetMapPosition(playerTransform.position);
-                // Move the common parent once. Moving the background too would double the offset.
-                mapContentRT.anchoredPosition = -mapPosition * zoomScale;
+                currentMapRotation = playerOrientedMap ? playerTransform.eulerAngles.y : 0f;
+                Quaternion contentRotation = Quaternion.Euler(0f, 0f, currentMapRotation);
+                mapContentRT.localRotation = contentRotation;
+
+                // Rotation changes the direction of the scaled player offset. Translate by the
+                // rotated value so the tracked player remains exactly at the mask center.
+                Vector3 centeredOffset = contentRotation
+                    * new Vector3(mapPosition.x * zoomScale, mapPosition.y * zoomScale, 0f);
+                mapContentRT.anchoredPosition = new Vector2(-centeredOffset.x, -centeredOffset.y);
             }
         }
         catch
         {
             // Game objects can be collected between the Unity null check and the IL2CPP call during scene changes.
+        }
+    }
+
+    private void UpdateUprightMarkerRotations()
+    {
+        Quaternion uprightRotation = Quaternion.Euler(0f, 0f, -currentMapRotation);
+        foreach (KeyValuePair<int, RectTransform> pair in liveBuildingLabelRects)
+        {
+            RectTransform labelRect = pair.Value;
+            if (labelRect != null)
+            {
+                Quaternion baseRotation = liveBuildingLabelBaseRotations.TryGetValue(pair.Key, out Quaternion rotation)
+                    ? rotation
+                    : Quaternion.identity;
+                labelRect.localRotation = uprightRotation * baseRotation;
+            }
+        }
+
+        foreach (RectTransform markerRect in livePoiMarkerRects.Values)
+        {
+            if (markerRect != null)
+            {
+                markerRect.localRotation = uprightRotation;
+            }
+        }
+
+        foreach (RectTransform markerRect in liveNpcMarkerRects.Values)
+        {
+            if (markerRect != null)
+            {
+                markerRect.localRotation = uprightRotation;
+            }
+        }
+
+        foreach (RectTransform markerRect in livePoliceMarkerRects.Values)
+        {
+            if (markerRect != null)
+            {
+                markerRect.localRotation = uprightRotation;
+            }
+        }
+
+        foreach (Text playerLabel in playerMarkerLabels.Values)
+        {
+            if (playerLabel != null)
+            {
+                playerLabel.rectTransform.localRotation = uprightRotation;
+            }
         }
     }
 
@@ -1277,13 +2173,18 @@ public sealed class MinimapView : MonoBehaviour
                 if (playerMarkerImages.TryGetValue(playerId, out Image markerImage) && markerImage != null)
                 {
                     markerImage.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -trackedTransform.eulerAngles.y);
-                    markerImage.color = GetPlayerMarkerColor(playerId, lobbyPlayer == Player.Local);
                 }
 
                 if (playerMarkerLabels.TryGetValue(playerId, out Text markerLabel) && markerLabel != null)
                 {
+                    markerLabel.enabled = mapTextVisible;
                     string playerName = string.IsNullOrWhiteSpace(lobbyPlayer.PlayerName) ? "Player" : lobbyPlayer.PlayerName;
-                    markerLabel.text = lobbyPlayer == Player.Local ? $"{playerName} (You)" : playerName;
+                    if (!playerMarkerSourceNames.TryGetValue(playerId, out string cachedPlayerName)
+                        || !string.Equals(cachedPlayerName, playerName, StringComparison.Ordinal))
+                    {
+                        markerLabel.text = lobbyPlayer == Player.Local ? string.Concat(playerName, " (You)") : playerName;
+                        playerMarkerSourceNames[playerId] = playerName;
+                    }
                 }
             }
         }
@@ -1312,9 +2213,8 @@ public sealed class MinimapView : MonoBehaviour
             playerMarkerRects.Remove(playerId);
             playerMarkerImages.Remove(playerId);
             playerMarkerLabels.Remove(playerId);
+            playerMarkerSourceNames.Remove(playerId);
         }
-
-        playerMarkerLayer.transform.SetAsLastSibling();
     }
 
     private void EnsurePlayerMarker(int playerId, Player lobbyPlayer)
@@ -1328,6 +2228,7 @@ public sealed class MinimapView : MonoBehaviour
         playerMarkerRects.Remove(playerId);
         playerMarkerImages.Remove(playerId);
         playerMarkerLabels.Remove(playerId);
+        playerMarkerSourceNames.Remove(playerId);
 
         GameObject marker = new($"LobbyPlayerMarker_{playerId}");
         marker.transform.SetParent(playerMarkerLayer.transform, false);
@@ -1369,6 +2270,7 @@ public sealed class MinimapView : MonoBehaviour
         label.color = Color.white;
         label.horizontalOverflow = HorizontalWrapMode.Overflow;
         label.verticalOverflow = VerticalWrapMode.Overflow;
+        label.enabled = mapTextVisible;
         label.raycastTarget = false;
         Outline labelOutline = labelObject.AddComponent<Outline>();
         labelOutline.effectColor = new Color(0f, 0f, 0f, 0.95f);
@@ -1426,16 +2328,6 @@ public sealed class MinimapView : MonoBehaviour
                     && liveNpcMarkerRects.TryGetValue(pair.Key, out RectTransform markerRect))
                 {
                     markerRect.anchoredPosition = mapUtility.GetMapPosition(source.transform.position);
-                    if (liveNpcMarkerPortraits.TryGetValue(pair.Key, out Image portrait) && portrait != null)
-                    {
-                        portrait.sprite = source.MugshotSprite;
-                        portrait.enabled = portrait.sprite != null;
-                        if (liveNpcMarkerBackgrounds.TryGetValue(pair.Key, out Image background)
-                            && background != null)
-                        {
-                            background.enabled = portrait.enabled;
-                        }
-                    }
                 }
             }
             catch
@@ -1460,15 +2352,13 @@ public sealed class MinimapView : MonoBehaviour
                     markerRect.anchoredPosition = mapUtility.GetMapPosition(officer.transform.position);
                 }
 
-                if (livePoliceMarkerPortraits.TryGetValue(pair.Key, out Image portrait) && portrait != null)
-                {
-                    portrait.sprite = officer.MugshotSprite;
-                    portrait.enabled = portrait.sprite != null;
-                }
-
                 if (livePoliceMarkerBackgrounds.TryGetValue(pair.Key, out Image background) && background != null)
                 {
-                    background.color = GetPoliceMarkerColor(officer);
+                    Color markerColor = GetPoliceMarkerColor(officer);
+                    if (background.color != markerColor)
+                    {
+                        background.color = markerColor;
+                    }
                 }
             }
             catch
@@ -1477,21 +2367,33 @@ public sealed class MinimapView : MonoBehaviour
             }
         }
 
-        liveBuildingLabelLayer.transform.SetAsLastSibling();
-        livePoiMarkerLayer.transform.SetAsLastSibling();
-        liveNpcMarkerLayer.transform.SetAsLastSibling();
-        livePoliceMarkerLayer.transform.SetAsLastSibling();
-        playerMarkerLayer?.transform.SetAsLastSibling();
+    }
+
+    [HideFromIl2Cpp]
+    private void RefreshAllMarkerSources()
+    {
+        ScanNativeBuildingLabels();
+        ScanLiveLocations();
+        RefreshLiveMarkerSources();
     }
 
     [HideFromIl2Cpp]
     private void RefreshLiveMarkerSources()
     {
-        nextLiveMarkerScanTime = Time.unscaledTime + LiveMarkerScanInterval;
-        ScanNativeBuildingLabels();
-        ScanLiveLocations();
+        nextLiveMarkerScanTime = Time.unscaledTime + ActorRegistrySyncInterval;
         ScanLiveNpcs();
+        LogLiveMarkerCountsIfChanged();
+    }
 
+    [HideFromIl2Cpp]
+    private void LogLiveMarkerCountsIfChanged()
+    {
+        if (liveMarkerSummaryLogged)
+        {
+            return;
+        }
+
+        liveMarkerSummaryLogged = true;
         int activePotentialCustomerAreas = 0;
         foreach (Image potentialCircle in liveNpcPotentialCustomerCircles.Values)
         {
@@ -1603,6 +2505,7 @@ public sealed class MinimapView : MonoBehaviour
 
                         int labelId = sourceLabel.gameObject.GetInstanceID();
                         scannedBuildingLabelIds.Add(labelId);
+                        liveBuildingLabelSources[labelId] = sourceLabel;
                         EnsureNativeBuildingLabel(labelId);
                         UpdateNativeBuildingLabel(labelId, sourceLabel, labelCoordinateRoot);
                     }
@@ -1626,7 +2529,42 @@ public sealed class MinimapView : MonoBehaviour
         foreach (int labelId in staleLiveMarkerIds)
         {
             DestroyMarker(liveBuildingLabelObjects, labelId);
+            liveBuildingLabelSources.Remove(labelId);
             liveBuildingLabelRects.Remove(labelId);
+            liveBuildingLabelBaseRotations.Remove(labelId);
+            liveBuildingLabels.Remove(labelId);
+            liveBuildingLabelShadows.Remove(labelId);
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private void RefreshCachedBuildingLabels()
+    {
+        RectTransform labelCoordinateRoot = mapAppInstance?.LabelGroup?.GetComponent<RectTransform>();
+        if (labelCoordinateRoot == null)
+        {
+            return;
+        }
+
+        staleLiveMarkerIds.Clear();
+        foreach (KeyValuePair<int, Text> pair in liveBuildingLabelSources)
+        {
+            Text sourceLabel = pair.Value;
+            if (sourceLabel == null || sourceLabel.gameObject == null)
+            {
+                staleLiveMarkerIds.Add(pair.Key);
+                continue;
+            }
+
+            UpdateNativeBuildingLabel(pair.Key, sourceLabel, labelCoordinateRoot);
+        }
+
+        foreach (int labelId in staleLiveMarkerIds)
+        {
+            DestroyMarker(liveBuildingLabelObjects, labelId);
+            liveBuildingLabelSources.Remove(labelId);
+            liveBuildingLabelRects.Remove(labelId);
+            liveBuildingLabelBaseRotations.Remove(labelId);
             liveBuildingLabels.Remove(labelId);
             liveBuildingLabelShadows.Remove(labelId);
         }
@@ -1652,6 +2590,7 @@ public sealed class MinimapView : MonoBehaviour
         label.color = new Color(0.78f, 0.78f, 0.78f, 1f);
         label.horizontalOverflow = HorizontalWrapMode.Wrap;
         label.verticalOverflow = VerticalWrapMode.Overflow;
+        label.enabled = mapTextVisible;
         label.raycastTarget = false;
         Shadow labelShadow = labelObject.AddComponent<Shadow>();
         labelShadow.effectColor = new Color(0f, 0f, 0f, 0.8f);
@@ -1723,7 +2662,9 @@ public sealed class MinimapView : MonoBehaviour
             sourceRelativeScale.x * zoomCompensation,
             sourceRelativeScale.y * zoomCompensation,
             1f);
-        targetRect.localRotation = sourceRelativeRotation;
+        liveBuildingLabelBaseRotations[labelId] = sourceRelativeRotation;
+        Quaternion uprightRotation = Quaternion.Euler(0f, 0f, -currentMapRotation);
+        targetRect.localRotation = uprightRotation * sourceRelativeRotation;
 
         targetLabel.text = sourceLabel.text.Trim();
         // The same built-in font used by the working POI labels avoids inheriting a phone-canvas
@@ -1742,7 +2683,7 @@ public sealed class MinimapView : MonoBehaviour
         targetLabel.color = EnsureReadableMapLabelColor(sourceLabel.color);
         targetLabel.material = null;
         targetLabel.maskable = true;
-        targetLabel.enabled = true;
+        targetLabel.enabled = mapTextVisible;
         targetLabel.raycastTarget = false;
         ForceCanvasRendererVisible(targetLabel.canvasRenderer);
         targetLabel.SetAllDirty();
@@ -1755,7 +2696,7 @@ public sealed class MinimapView : MonoBehaviour
                 : new Color(0f, 0f, 0f, 0.8f);
             targetShadow.effectDistance = sourceShadow != null ? sourceShadow.effectDistance : new Vector2(1f, -1f);
             targetShadow.useGraphicAlpha = sourceShadow == null || sourceShadow.useGraphicAlpha;
-            targetShadow.enabled = true;
+            targetShadow.enabled = mapTextVisible;
         }
     }
 
@@ -1801,19 +2742,13 @@ public sealed class MinimapView : MonoBehaviour
             {
                 foreach (POI location in locations)
                 {
-                    if (location == null || location.gameObject == null
-                        || location.gameObject.GetComponent<NPCPoI>() != null
-                        || IsPlayerPoi(location)
-                        || (!deadDropPoisVisible && IsDeadDropPoi(location)))
+                    if (!TryRegisterLiveLocation(location))
                     {
                         continue;
                     }
 
                     int locationId = location.gameObject.GetInstanceID();
                     scannedPoiIds.Add(locationId);
-                    livePoiSources[locationId] = location;
-                    EnsureLocationMarker(locationId);
-                    UpdateLocationMarkerVisual(locationId, location);
                 }
             }
         }
@@ -1833,13 +2768,79 @@ public sealed class MinimapView : MonoBehaviour
 
         foreach (int locationId in staleLiveMarkerIds)
         {
-            DestroyMarker(livePoiMarkers, locationId);
-            livePoiSources.Remove(locationId);
-            livePoiMarkerRects.Remove(locationId);
-            livePoiMarkerBackgrounds.Remove(locationId);
-            livePoiMarkerIcons.Remove(locationId);
-            livePoiMarkerLabels.Remove(locationId);
+            RemoveLiveLocation(locationId);
         }
+    }
+
+    [HideFromIl2Cpp]
+    public void OnLiveLocationEnabled(POI location)
+    {
+        if (cleanedUp || livePoiMarkerLayer == null)
+        {
+            return;
+        }
+
+        TryRegisterLiveLocation(location);
+        LogLiveMarkerCountsIfChanged();
+    }
+
+    [HideFromIl2Cpp]
+    public void OnLiveLocationDisabled(POI location)
+    {
+        if (cleanedUp || location == null || location.gameObject == null)
+        {
+            return;
+        }
+
+        RemoveLiveLocation(location.gameObject.GetInstanceID());
+        LogLiveMarkerCountsIfChanged();
+    }
+
+    [HideFromIl2Cpp]
+    public void OnLiveLocationChanged(POI location)
+    {
+        if (cleanedUp || location == null || location.gameObject == null)
+        {
+            return;
+        }
+
+        int locationId = location.gameObject.GetInstanceID();
+        if (!livePoiSources.ContainsKey(locationId))
+        {
+            TryRegisterLiveLocation(location);
+            return;
+        }
+
+        UpdateLocationMarkerVisual(locationId, location);
+    }
+
+    [HideFromIl2Cpp]
+    private bool TryRegisterLiveLocation(POI location)
+    {
+        if (location == null || location.gameObject == null
+            || !location.gameObject.activeInHierarchy
+            || location.gameObject.GetComponent<NPCPoI>() != null
+            || IsPlayerPoi(location)
+            || (!deadDropPoisVisible && IsDeadDropPoi(location)))
+        {
+            return false;
+        }
+
+        int locationId = location.gameObject.GetInstanceID();
+        livePoiSources[locationId] = location;
+        EnsureLocationMarker(locationId);
+        UpdateLocationMarkerVisual(locationId, location);
+        return true;
+    }
+
+    private void RemoveLiveLocation(int locationId)
+    {
+        DestroyMarker(livePoiMarkers, locationId);
+        livePoiSources.Remove(locationId);
+        livePoiMarkerRects.Remove(locationId);
+        livePoiMarkerBackgrounds.Remove(locationId);
+        livePoiMarkerIcons.Remove(locationId);
+        livePoiMarkerLabels.Remove(locationId);
     }
 
     private static bool IsPlayerPoi(POI location)
@@ -1891,13 +2892,16 @@ public sealed class MinimapView : MonoBehaviour
     {
         scannedNpcIds.Clear();
         scannedPoliceIds.Clear();
+        bool npcRegistryAvailable = false;
+        bool officerRegistryAvailable = false;
         try
         {
-            NPC[] npcs = UnityEngine.Object.FindObjectsOfType<NPC>();
+            Il2CppSystem.Collections.Generic.List<NPC> npcs = NPCManager.NPCRegistry;
             if (npcs != null)
             {
-                foreach (NPC npc in npcs)
+                for (int index = 0; index < npcs.Count; index++)
                 {
+                    NPC npc = npcs[index];
                     if (npc == null || npc.gameObject == null || !npc.gameObject.activeInHierarchy
                         || npc.IsLocalPlayer)
                     {
@@ -1905,58 +2909,142 @@ public sealed class MinimapView : MonoBehaviour
                     }
 
                     int npcId = npc.gameObject.GetInstanceID();
-                    PoliceOfficer officer = npc.gameObject.GetComponent<PoliceOfficer>();
+                    livePoliceSources.TryGetValue(npcId, out PoliceOfficer officer);
+                    if (officer == null && !liveNpcSources.ContainsKey(npcId))
+                    {
+                        officer = npc.gameObject.GetComponent<PoliceOfficer>();
+                    }
+
                     if (officer != null)
                     {
-                        if (IsOfficerDead(officer))
-                        {
-                            continue;
-                        }
-
-                        scannedPoliceIds.Add(npcId);
-                        livePoliceSources[npcId] = officer;
-                        EnsurePoliceMarker(npcId);
-                        if (livePoliceMarkerPortraits.TryGetValue(npcId, out Image policePortrait)
-                            && policePortrait != null)
-                        {
-                            policePortrait.sprite = officer.MugshotSprite;
-                            policePortrait.enabled = policePortrait.sprite != null;
-                        }
+                        RegisterLivePoliceOfficer(officer);
                     }
                     else
                     {
-                        scannedNpcIds.Add(npcId);
-                        liveNpcSources[npcId] = npc;
-                        EnsureNpcMarker(npcId);
-                        if (liveNpcPotentialCustomerCircles.TryGetValue(npcId, out Image potentialCircle)
-                            && potentialCircle != null)
-                        {
-                            Customer customer = npc.gameObject.GetComponent<Customer>();
-                            potentialCircle.enabled = IsPotentialCustomer(customer);
-                        }
-
-                        if (liveNpcMarkerPortraits.TryGetValue(npcId, out Image npcPortrait)
-                            && npcPortrait != null)
-                        {
-                            npcPortrait.sprite = npc.MugshotSprite;
-                            npcPortrait.enabled = npcPortrait.sprite != null;
-                            if (liveNpcMarkerBackgrounds.TryGetValue(npcId, out Image npcBackground)
-                                && npcBackground != null)
-                            {
-                                npcBackground.enabled = npcPortrait.enabled;
-                            }
-                        }
+                        RegisterLiveNpc(npc);
                     }
                 }
+
+                npcRegistryAvailable = true;
+            }
+
+            Il2CppSystem.Collections.Generic.List<PoliceOfficer> officers = PoliceOfficer.Officers;
+            if (officers != null)
+            {
+                for (int index = 0; index < officers.Count; index++)
+                {
+                    RegisterLivePoliceOfficer(officers[index]);
+                }
+
+                officerRegistryAvailable = true;
             }
         }
         catch (Exception exception)
         {
-            MelonLogger.Warning($"NugzzMinimap could not refresh NPC markers: {exception.Message}");
+            MelonLogger.Warning($"NugzzMinimap could not synchronize actor registries: {exception.Message}");
         }
 
-        RemoveStaleNpcMarkers();
-        RemoveStalePoliceMarkers();
+        if (npcRegistryAvailable)
+        {
+            RemoveStaleNpcMarkers();
+        }
+
+        if (officerRegistryAvailable)
+        {
+            RemoveStalePoliceMarkers();
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private void RegisterLiveNpc(NPC npc)
+    {
+        if (npc == null || npc.gameObject == null || !npc.gameObject.activeInHierarchy || npc.IsLocalPlayer)
+        {
+            return;
+        }
+
+        int npcId = npc.gameObject.GetInstanceID();
+        scannedNpcIds.Add(npcId);
+        liveNpcSources[npcId] = npc;
+        EnsureNpcMarker(npcId);
+
+        if (!liveCustomerSources.TryGetValue(npcId, out Customer customer))
+        {
+            customer = npc.gameObject.GetComponent<Customer>();
+            liveCustomerSources[npcId] = customer;
+        }
+
+        if (liveNpcPotentialCustomerCircles.TryGetValue(npcId, out Image potentialCircle)
+            && potentialCircle != null)
+        {
+            bool shouldShowPotentialArea = IsPotentialCustomer(customer);
+            if (potentialCircle.enabled != shouldShowPotentialArea)
+            {
+                potentialCircle.enabled = shouldShowPotentialArea;
+            }
+        }
+
+        if (liveNpcMarkerPortraits.TryGetValue(npcId, out Image npcPortrait) && npcPortrait != null)
+        {
+            if (!npcPortrait.enabled || npcPortrait.sprite == null)
+            {
+                npcPortrait.sprite = npc.MugshotSprite;
+                npcPortrait.enabled = npcPortrait.sprite != null;
+            }
+
+            if (liveNpcMarkerBackgrounds.TryGetValue(npcId, out Image npcBackground) && npcBackground != null)
+            {
+                if (npcBackground.enabled != npcPortrait.enabled)
+                {
+                    npcBackground.enabled = npcPortrait.enabled;
+                }
+            }
+        }
+    }
+
+    [HideFromIl2Cpp]
+    private void RegisterLivePoliceOfficer(PoliceOfficer officer)
+    {
+        if (officer == null || officer.gameObject == null || !officer.gameObject.activeInHierarchy
+            || IsOfficerDead(officer))
+        {
+            return;
+        }
+
+        int officerId = officer.gameObject.GetInstanceID();
+        scannedPoliceIds.Add(officerId);
+        livePoliceSources[officerId] = officer;
+        EnsurePoliceMarker(officerId);
+        if (livePoliceMarkerPortraits.TryGetValue(officerId, out Image policePortrait)
+            && policePortrait != null)
+        {
+            if (!policePortrait.enabled || policePortrait.sprite == null)
+            {
+                policePortrait.sprite = officer.MugshotSprite;
+                policePortrait.enabled = policePortrait.sprite != null;
+            }
+        }
+    }
+
+    [HideFromIl2Cpp]
+    public void OnPotentialCustomerStateChanged(Customer customer)
+    {
+        if (cleanedUp || customer == null || customer.gameObject == null)
+        {
+            return;
+        }
+
+        int npcId = customer.gameObject.GetInstanceID();
+        liveCustomerSources[npcId] = customer;
+        if (liveNpcPotentialCustomerCircles.TryGetValue(npcId, out Image potentialCircle)
+            && potentialCircle != null)
+        {
+            bool shouldShowPotentialArea = IsPotentialCustomer(customer);
+            if (potentialCircle.enabled != shouldShowPotentialArea)
+            {
+                potentialCircle.enabled = shouldShowPotentialArea;
+            }
+        }
     }
 
     private static bool IsPotentialCustomer(Customer customer)
@@ -2015,6 +3103,7 @@ public sealed class MinimapView : MonoBehaviour
         label.color = new Color(0.92f, 0.92f, 0.92f, 1f);
         label.horizontalOverflow = HorizontalWrapMode.Overflow;
         label.verticalOverflow = VerticalWrapMode.Overflow;
+        label.enabled = mapTextVisible;
         label.raycastTarget = false;
         Outline labelOutline = labelObject.AddComponent<Outline>();
         labelOutline.effectColor = new Color(0f, 0f, 0f, 0.95f);
@@ -2043,21 +3132,22 @@ public sealed class MinimapView : MonoBehaviour
         if (livePoiMarkerLabels.TryGetValue(locationId, out Text label) && label != null)
         {
             label.text = locationName ?? string.Empty;
-            label.enabled = !string.IsNullOrWhiteSpace(label.text);
+            label.enabled = mapTextVisible && !string.IsNullOrWhiteSpace(label.text);
         }
 
         Sprite iconSprite = GetLocationIcon(location, out Color iconColor);
         bool hasIcon = iconSprite != null;
+        bool showIcon = hasIcon && (IsDeadDropPoi(location) || locationIconsVisible);
         if (livePoiMarkerIcons.TryGetValue(locationId, out Image icon) && icon != null)
         {
             icon.sprite = iconSprite;
             icon.color = iconColor;
-            icon.enabled = hasIcon;
+            icon.enabled = showIcon;
         }
 
         if (livePoiMarkerBackgrounds.TryGetValue(locationId, out Image background) && background != null)
         {
-            background.enabled = hasIcon;
+            background.enabled = showIcon;
         }
     }
 
@@ -2197,6 +3287,7 @@ public sealed class MinimapView : MonoBehaviour
         {
             DestroyMarker(liveNpcMarkers, npcId);
             liveNpcSources.Remove(npcId);
+            liveCustomerSources.Remove(npcId);
             liveNpcMarkerRects.Remove(npcId);
             liveNpcPotentialCustomerCircles.Remove(npcId);
             liveNpcMarkerBackgrounds.Remove(npcId);
@@ -2324,16 +3415,18 @@ public sealed class MinimapView : MonoBehaviour
 
     private void ScanForPotentialCustomers()
     {
-        Customer[] customers = UnityEngine.Object.FindObjectsOfType<Customer>();
-        if (customers == null)
+        Il2CppSystem.Collections.Generic.List<NPC> npcs = NPCManager.NPCRegistry;
+        if (npcs == null)
         {
             return;
         }
 
-        foreach (Customer customer in customers)
+        for (int index = 0; index < npcs.Count; index++)
         {
             try
             {
+                NPC npc = npcs[index];
+                Customer customer = npc?.gameObject?.GetComponent<Customer>();
                 if (customer == null || customer.gameObject == null)
                 {
                     continue;
@@ -2346,12 +3439,6 @@ public sealed class MinimapView : MonoBehaviour
                 }
 
                 npcPois.Remove(customerId);
-                NPC npc = customer.gameObject.GetComponent<NPC>();
-                if (npc == null)
-                {
-                    continue;
-                }
-
                 GameObject poi = CreateNPCPOI(customer, npc);
                 if (poi != null)
                 {

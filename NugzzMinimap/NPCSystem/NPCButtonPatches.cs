@@ -1,12 +1,14 @@
 using System;
 using NugzzMinimap.Main;
 using HarmonyLib;
+using Il2CppScheduleOne.Economy;
 using Il2CppScheduleOne.Map;
 using Il2CppScheduleOne.NPCs;
 using Il2CppScheduleOne.UI.Phone.ContactsApp;
 using Il2CppScheduleOne.UI.Phone.Map;
 using MelonLoader;
 using UnityEngine;
+using HintDisplay = Il2CppScheduleOne.UI.HintDisplay;
 
 namespace NugzzMinimap.NPCSystem;
 
@@ -95,6 +97,102 @@ public static class NPCButtonPatches
             catch (Exception exception)
             {
                 LogPatchFailure("opening a contact", exception);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(POI), "OnEnable")]
+    private static class PoiEnabledPatch
+    {
+        private static void Postfix(POI __instance)
+        {
+            try
+            {
+                minimapViewInstance?.OnLiveLocationEnabled(__instance);
+            }
+            catch (Exception exception)
+            {
+                LogPatchFailure("registering a live map location", exception);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(POI), "OnDisable")]
+    private static class PoiDisabledPatch
+    {
+        private static void Prefix(POI __instance)
+        {
+            try
+            {
+                minimapViewInstance?.OnLiveLocationDisabled(__instance);
+            }
+            catch (Exception exception)
+            {
+                LogPatchFailure("removing a live map location", exception);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(POI), nameof(POI.InitializeUI))]
+    private static class PoiInitializedPatch
+    {
+        private static void Postfix(POI __instance)
+        {
+            try
+            {
+                minimapViewInstance?.OnLiveLocationChanged(__instance);
+            }
+            catch (Exception exception)
+            {
+                LogPatchFailure("refreshing a live map location", exception);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(POI), nameof(POI.SetMainText), typeof(string))]
+    private static class PoiTextChangedPatch
+    {
+        private static void Postfix(POI __instance)
+        {
+            try
+            {
+                minimapViewInstance?.OnLiveLocationChanged(__instance);
+            }
+            catch (Exception exception)
+            {
+                LogPatchFailure("refreshing a live map label", exception);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(Customer), nameof(Customer.SetPotentialCustomerPoIEnabled), typeof(bool))]
+    private static class PotentialCustomerStatePatch
+    {
+        private static void Postfix(Customer __instance)
+        {
+            try
+            {
+                minimapViewInstance?.OnPotentialCustomerStateChanged(__instance);
+            }
+            catch (Exception exception)
+            {
+                LogPatchFailure("refreshing a potential-customer area", exception);
+            }
+        }
+    }
+
+    [HarmonyPatch(typeof(HintDisplay), "SetHint")]
+    private static class HintDisplaySetHintPatch
+    {
+        private static void Postfix(HintDisplay __instance)
+        {
+            try
+            {
+                minimapViewInstance?.OnHintDisplayUpdated(__instance);
+            }
+            catch (Exception exception)
+            {
+                LogPatchFailure("positioning a HUD hint", exception);
             }
         }
     }

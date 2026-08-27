@@ -29,6 +29,9 @@ public sealed class MapPreferences
     public MelonPreferences_Entry<bool> TrackPolice { get; private set; }
     public MelonPreferences_Entry<bool> ShowDeadDropPois { get; private set; }
     public MelonPreferences_Entry<int> MinimapZoom { get; private set; }
+    public MelonPreferences_Entry<bool> ShowMapText { get; private set; }
+    public MelonPreferences_Entry<bool> ShowLocationIcons { get; private set; }
+    public MelonPreferences_Entry<bool> PlayerOrientedMap { get; private set; }
 
     public MelonPreferences_Entry<float> MinimapPositionX { get; private set; }
     public MelonPreferences_Entry<float> MinimapPositionY { get; private set; }
@@ -41,13 +44,12 @@ public sealed class MapPreferences
 
     public float MinimapScaleFactor => IncreaseSize.Value ? IncreasedScaleFactor : DefaultScaleFactor;
 
-    public float MinimapZoomScale
+    public float MinimapZoomScale => GetMinimapZoomScale(MinimapZoom.Value);
+
+    public static float GetMinimapZoomScale(int zoomLevel)
     {
-        get
-        {
-            int level = Math.Max(1, Math.Min(10, MinimapZoom.Value));
-            return 0.4f + (level - 1) * 0.0667f;
-        }
+        int level = Math.Max(1, Math.Min(10, zoomLevel));
+        return 0.4f + (level - 1) * 0.0667f;
     }
 
     public void LoadPreferences()
@@ -72,6 +74,12 @@ public sealed class MapPreferences
             "Show Dead Drop POIs", "Show or hide dead-drop names and icons on the minimap");
         MinimapZoom = GetOrCreateEntry(TogglesCategory, "H_MinimapZoom", 7,
             "Minimap Zoom Level", "Zoom level from 1 (zoomed out) to 10 (zoomed in)");
+        ShowMapText = GetOrCreateEntry(TogglesCategory, "I_ShowMapText", true,
+            "Show Minimap Text", "Show player names, building names, and location labels on the minimap");
+        ShowLocationIcons = GetOrCreateEntry(TogglesCategory, "J_ShowLocationIcons", true,
+            "Show House & Business Icons", "Show house, business, and other location icons on the minimap");
+        PlayerOrientedMap = GetOrCreateEntry(TogglesCategory, "K_PlayerOrientedMap", false,
+            "Player-Oriented Minimap", "Rotate the minimap so the local player's direction stays at the top");
 
         TimeDisplayTextColor = GetOrCreateEntry(TextDisplayCategory, "A_TimeDisplayTextColor",
             TimeDisplayColor.White, "Time Display Text Color", "Color of the time/date display text");

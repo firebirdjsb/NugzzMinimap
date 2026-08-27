@@ -123,6 +123,10 @@ public sealed class MinimapManager : MonoBehaviour
             mapPreferences.TrackNPCs.Value,
             mapPreferences.TrackPolice.Value,
             mapPreferences.ShowDeadDropPois.Value,
+            mapPreferences.ShowMapText.Value,
+            mapPreferences.ShowLocationIcons.Value,
+            mapPreferences.PlayerOrientedMap.Value,
+            mapPreferences.MinimapZoom.Value,
             mapPreferences.MinimapZoomScale,
             mapPreferences.MinimapPositionX.Value,
             mapPreferences.MinimapPositionY.Value,
@@ -131,7 +135,11 @@ public sealed class MinimapManager : MonoBehaviour
             mapPreferences.TimeDisplayTextColor.Value,
             mapPreferences.TimeDisplayBackgroundOpacity.Value / 100f,
             mapPreferences.TimeDisplayTextSize.Value,
-            OnDeadDropButtonChanged);
+            OnDeadDropButtonChanged,
+            OnLocationIconButtonChanged,
+            OnMapTextButtonChanged,
+            OnZoomLevelButtonChanged,
+            OnPlayerOrientationButtonChanged);
 
         NPCButtonPatches.SetMinimapView(minimapView);
         SubscribeEvents();
@@ -193,6 +201,9 @@ public sealed class MinimapManager : MonoBehaviour
         mapPreferences.TrackNPCs.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnTrackNPCsChanged));
         mapPreferences.TrackPolice.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnTrackPoliceChanged));
         mapPreferences.ShowDeadDropPois.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnShowDeadDropPoisChanged));
+        mapPreferences.ShowMapText.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnShowMapTextChanged));
+        mapPreferences.ShowLocationIcons.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnShowLocationIconsChanged));
+        mapPreferences.PlayerOrientedMap.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnPlayerOrientedMapChanged));
         mapPreferences.MinimapZoom.OnEntryValueChanged.Subscribe(new LemonAction<int, int>(OnMinimapZoomChanged));
         mapPreferences.MinimapPositionX.OnEntryValueChanged.Subscribe(new LemonAction<float, float>(OnMinimapPositionXChanged));
         mapPreferences.MinimapPositionY.OnEntryValueChanged.Subscribe(new LemonAction<float, float>(OnMinimapPositionYChanged));
@@ -218,6 +229,9 @@ public sealed class MinimapManager : MonoBehaviour
         mapPreferences.TrackNPCs.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnTrackNPCsChanged));
         mapPreferences.TrackPolice.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnTrackPoliceChanged));
         mapPreferences.ShowDeadDropPois.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnShowDeadDropPoisChanged));
+        mapPreferences.ShowMapText.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnShowMapTextChanged));
+        mapPreferences.ShowLocationIcons.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnShowLocationIconsChanged));
+        mapPreferences.PlayerOrientedMap.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnPlayerOrientedMapChanged));
         mapPreferences.MinimapZoom.OnEntryValueChanged.Unsubscribe(new LemonAction<int, int>(OnMinimapZoomChanged));
         mapPreferences.MinimapPositionX.OnEntryValueChanged.Unsubscribe(new LemonAction<float, float>(OnMinimapPositionXChanged));
         mapPreferences.MinimapPositionY.OnEntryValueChanged.Unsubscribe(new LemonAction<float, float>(OnMinimapPositionYChanged));
@@ -236,6 +250,9 @@ public sealed class MinimapManager : MonoBehaviour
     private void OnTrackNPCsChanged(bool oldValue, bool newValue) => minimapView?.UpdateNPCTracking(newValue);
     private void OnTrackPoliceChanged(bool oldValue, bool newValue) => minimapView?.UpdatePoliceTracking(newValue);
     private void OnShowDeadDropPoisChanged(bool oldValue, bool newValue) => minimapView?.UpdateDeadDropVisibility(newValue);
+    private void OnShowMapTextChanged(bool oldValue, bool newValue) => minimapView?.UpdateMapTextVisibility(newValue);
+    private void OnShowLocationIconsChanged(bool oldValue, bool newValue) => minimapView?.UpdateLocationIconVisibility(newValue);
+    private void OnPlayerOrientedMapChanged(bool oldValue, bool newValue) => minimapView?.UpdatePlayerOrientedMap(newValue);
 
     [HideFromIl2Cpp]
     private void OnDeadDropButtonChanged(bool isVisible)
@@ -249,7 +266,57 @@ public sealed class MinimapManager : MonoBehaviour
         mapPreferences.TogglesCategory.SaveToFile(false);
     }
 
-    private void OnMinimapZoomChanged(int oldValue, int newValue) => minimapView?.UpdateZoomLevel(mapPreferences.MinimapZoomScale);
+    [HideFromIl2Cpp]
+    private void OnLocationIconButtonChanged(bool isVisible)
+    {
+        if (mapPreferences?.ShowLocationIcons == null || mapPreferences.ShowLocationIcons.Value == isVisible)
+        {
+            return;
+        }
+
+        mapPreferences.ShowLocationIcons.Value = isVisible;
+        mapPreferences.TogglesCategory.SaveToFile(false);
+    }
+
+    [HideFromIl2Cpp]
+    private void OnMapTextButtonChanged(bool isVisible)
+    {
+        if (mapPreferences?.ShowMapText == null || mapPreferences.ShowMapText.Value == isVisible)
+        {
+            return;
+        }
+
+        mapPreferences.ShowMapText.Value = isVisible;
+        mapPreferences.TogglesCategory.SaveToFile(false);
+    }
+
+    [HideFromIl2Cpp]
+    private void OnZoomLevelButtonChanged(int zoomLevel)
+    {
+        int clampedZoomLevel = System.Math.Max(1, System.Math.Min(10, zoomLevel));
+        if (mapPreferences?.MinimapZoom == null || mapPreferences.MinimapZoom.Value == clampedZoomLevel)
+        {
+            return;
+        }
+
+        mapPreferences.MinimapZoom.Value = clampedZoomLevel;
+        mapPreferences.TogglesCategory.SaveToFile(false);
+    }
+
+    [HideFromIl2Cpp]
+    private void OnPlayerOrientationButtonChanged(bool isEnabled)
+    {
+        if (mapPreferences?.PlayerOrientedMap == null || mapPreferences.PlayerOrientedMap.Value == isEnabled)
+        {
+            return;
+        }
+
+        mapPreferences.PlayerOrientedMap.Value = isEnabled;
+        mapPreferences.TogglesCategory.SaveToFile(false);
+    }
+
+    private void OnMinimapZoomChanged(int oldValue, int newValue)
+        => minimapView?.UpdateZoomLevel(newValue, mapPreferences.MinimapZoomScale);
 
     private void OnMinimapPositionXChanged(float oldValue, float newValue)
         => minimapView?.UpdateMinimapPosition(newValue, mapPreferences.MinimapPositionY.Value);
