@@ -9,20 +9,21 @@
    independent copy of `MapApp.BackgroundImage`, an embedded calibrated sewer-map crop, and
    dedicated marker layers.
 4. Static place names and POIs are discovered once, then updated through `POI` lifecycle/text
-   patches. Once per second, the view walks the game's `NPCManager.NPCRegistry` and
-   `PoliceOfficer.Officers` lists without allocating scene-wide arrays. Every frame it converts
-   cached world positions with `MapPositionUtility`.
+   patches. The view walks the game's `NPCManager.NPCRegistry` and `PoliceOfficer.Officers` lists
+   one entry per frame, then waits two seconds before beginning the next pass. Every frame it
+   converts cached live-actor world positions with `MapPositionUtility`.
 5. `NPCButtonPatches` hides the HUD while `MapApp.SetOpen(true)` uses the untouched phone map and
    resumes the HUD after `SetOpen(false)`. `MinimapView` also reconciles its latch with the native
    `MapApp.opened` field every frame and on focus return, recovering if a focus transition bypasses
    the Harmony close callback.
 6. NPC and police markers are HUD-owned only. The mod does not create, reparent, enable, or recolor
    native phone-map POIs, so opening the phone map remains independent.
-7. `Player.PlayerList` is read every frame to place named, directional markers for the local player
-   and every connected lobby member.
-8. Every 0.1 seconds, the game-owned `SewerCameraPresense` volume detector tests the local player's
-   position. Its result selects the calibrated sewer overlay regardless of which manhole, entrance,
-   or sewer door was used; leaving all sewer volumes restores the surface layer.
+7. `Player.PlayerList` is read every frame to place directional markers for the local player and
+   every connected lobby member; player display names are refreshed once per second.
+8. Every 0.25 seconds, the minimap reads the presence value already cached by the game-owned
+   `SewerCameraPresense` controller. Its result selects the calibrated sewer overlay regardless of
+   which manhole, entrance, or sewer door was used; leaving all sewer volumes restores the surface
+   layer without repeating the game's sewer-volume query.
 9. On scene exit or mod unload, the manager stops every coroutine, unsubscribes every preference
    event, destroys generated textures/UI, and clears the static
    patch reference.
@@ -42,10 +43,10 @@
 | Coroutine | Interval | Purpose |
 | --- | ---: | --- |
 | Manager readiness | one frame | Wait for the player and phone map without calling `MapApp.Awake()` manually. |
-| Actor registry sync | 1 second | Walk the game's NPC/officer registries; add new markers and prune stale ones without a Unity scene scan. |
+| Actor registry sync | one entry per frame, then 2-second idle | Walk the game's NPC/officer registries incrementally; add new markers and prune stale ones without a single-frame spike or Unity scene scan. |
 | POI lifecycle patches | event-driven | Add, remove, or refresh location markers when their native POI changes. |
-| Marker positioning | every `LateUpdate` | Convert current world positions and update multiplayer directions. |
-| Sewer layer state | 0.1 seconds | Use the native sewer-volume test to switch map layers without scene scans. |
+| Marker positioning | every `LateUpdate` | Convert current live-actor positions and update multiplayer directions; static POIs remain event-driven. |
+| Sewer layer state | 0.25 seconds | Read the game controller's cached sewer-presence value without duplicating its volume query. |
 
 The manager readiness coroutine is retained and stopped during cleanup. Continuous location/NPC
 tracking is handled by `LateUpdate`, so no infinite marker coroutine survives a scene change.
@@ -91,6 +92,8 @@ The main integration layer:
 - provides compact `DROPS`, `ICONS`, and `TEXT` HUD buttons, lower-corner zoom `-`/`+` controls, and
   centered `ROTATE ON/OFF`; their managed callbacks update matching preferences and save the toggle
   category immediately;
+- polls one configurable legacy Unity `KeyCode` while the HUD is visible and toggles only the six
+  clickable controls, preserving all map, marker, clock, zoom, and layer state;
 - filters the uninitialized `PoI Main Text` prefab placeholder from all label sources;
 - reads active NPCs and police from the game's registries and renders their native `MugshotSprite`;
 - keeps both the NPC portrait and its white backing disabled while `MugshotSprite` is null, avoiding
@@ -109,6 +112,8 @@ The main integration layer:
   animation/layout pass from returning it over the minimap, while the original values are restored
   when the minimap hides;
 - maintains dictionaries keyed by Unity instance ID and prunes despawned objects;
+- writes UI transforms, rotations, image properties, and hint-panel layout only when their values
+  actually change, avoiding needless Canvas rebuild work;
 - centers, scales, and optionally rotates only the HUD content, leaving the native phone map's
   pan/zoom/orientation state untouched.
 
@@ -121,8 +126,11 @@ live opacity changes are not multiplied by the startup alpha.
 ### `NugzzMinimap/Helpers/MapPreferences.cs`
 
 Defines configuration schema and compatibility keys. Categories and entries are repaired
-individually, then all three categories are loaded from the shared configuration file. Numeric
-values are clamped at their use sites.
+individually, then all three categories are loaded from `Mods/NugzzMinimap Mod Settings.cfg` beside
+the DLL. A legacy `UserData/NugzzMinimap.cfg` is copied once without deleting the rollback source;
+its old default F8 control binding is migrated to Home. The file is prepared during MelonLoader
+startup, then the shared preference entries are loaded again when the main-scene HUD is built.
+Numeric values are clamped at their use sites.
 
 ### `NugzzMinimap/Helpers/Utils.cs`
 
@@ -174,6 +182,10 @@ MelonLoader game/mod metadata and repaired assembly version.
 - Hid mod-local enum methods from native class injection, eliminating the false
   `Assembly NugzzMinimap.dll is not registered in il2cpp` lookup.
 - Moved police coloring from every rendered frame to a 0.3-second state update.
+- Spread NPC/police registry discovery over frames instead of processing the complete registry in
+  one recurring gameplay frame.
+- Reused the game controller's cached sewer-presence result instead of repeating its volume query.
+- Removed unchanged background, marker, and hint-layout writes from the hot update path.
 - Reduced clock text writes from every rendered frame to once per in-game minute/day change.
 - Removed unused/decompiler-generated source and the inactive POI patch that would have duplicated
   `POI.UpdatePosition()` work if enabled.

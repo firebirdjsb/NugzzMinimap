@@ -7,7 +7,7 @@
     <Nullable>disable</Nullable>
     <RootNamespace>NugzzMinimap</RootNamespace>
     <AssemblyName>NugzzMinimap</AssemblyName>
-    <Version>1.6.22</Version>
+    <Version>1.6.26</Version>
     <Authors>XUnfairX/GrandmasAnkles</Authors>
     <Description>A live HUD minimap and clock for Schedule I.</Description>
     <RepositoryUrl>https://github.com/firebirdjsb/NugzzMinimap</RepositoryUrl>
@@ -36,6 +36,7 @@
     <Reference Include="Il2Cppmscorlib" HintPath="$(Il2CppAssembliesPath)\Il2Cppmscorlib.dll" Private="false" />
     <Reference Include="UnityEngine.CoreModule" HintPath="$(Il2CppAssembliesPath)\UnityEngine.CoreModule.dll" Private="false" />
     <Reference Include="UnityEngine.ImageConversionModule" HintPath="$(Il2CppAssembliesPath)\UnityEngine.ImageConversionModule.dll" Private="false" />
+    <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(Il2CppAssembliesPath)\UnityEngine.InputLegacyModule.dll" Private="false" />
     <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(Il2CppAssembliesPath)\UnityEngine.TextRenderingModule.dll" Private="false" />
     <Reference Include="UnityEngine.UI" HintPath="$(Il2CppAssembliesPath)\UnityEngine.UI.dll" Private="false" />
     <Reference Include="UnityEngine.UIModule" HintPath="$(Il2CppAssembliesPath)\UnityEngine.UIModule.dll" Private="false" />

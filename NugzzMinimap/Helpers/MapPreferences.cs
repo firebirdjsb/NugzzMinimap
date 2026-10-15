@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using MelonLoader;
+using UnityEngine;
 
 namespace NugzzMinimap.Helpers;
 
@@ -12,7 +14,8 @@ public sealed class MapPreferences
     private const string TogglesCategoryId = "NugzzMinimap_1_Toggles";
     private const string TextDisplayCategoryId = "NugzzMinimap_2_TextDisplay";
     private const string PositionCategoryId = "NugzzMinimap_3_Position";
-    private const string PreferencesPath = "UserData/NugzzMinimap.cfg";
+    private const string PreferencesPath = "Mods/NugzzMinimap Mod Settings.cfg";
+    private const string LegacyPreferencesPath = "UserData/NugzzMinimap.cfg";
 
     private const float DefaultScaleFactor = 1.5f;
     private const float IncreasedScaleFactor = 2.2f;
@@ -32,6 +35,7 @@ public sealed class MapPreferences
     public MelonPreferences_Entry<bool> ShowMapText { get; private set; }
     public MelonPreferences_Entry<bool> ShowLocationIcons { get; private set; }
     public MelonPreferences_Entry<bool> PlayerOrientedMap { get; private set; }
+    public MelonPreferences_Entry<KeyCode> ToggleControlsHotkey { get; private set; }
 
     public MelonPreferences_Entry<float> MinimapPositionX { get; private set; }
     public MelonPreferences_Entry<float> MinimapPositionY { get; private set; }
@@ -54,6 +58,8 @@ public sealed class MapPreferences
 
     public void LoadPreferences()
     {
+        bool migratedLegacyPreferences = MigrateLegacyPreferencesFile();
+
         TogglesCategory = GetOrCreateCategory(TogglesCategoryId, "Minimap Toggles & Settings");
         TextDisplayCategory = GetOrCreateCategory(TextDisplayCategoryId, "Time Display Appearance");
         PositionCategory = GetOrCreateCategory(PositionCategoryId, "Position Settings");
@@ -80,6 +86,9 @@ public sealed class MapPreferences
             "Show House & Business Icons", "Show house, business, and other location icons on the minimap");
         PlayerOrientedMap = GetOrCreateEntry(TogglesCategory, "K_PlayerOrientedMap", false,
             "Player-Oriented Minimap", "Rotate the minimap so the local player's direction stays at the top");
+        ToggleControlsHotkey = GetOrCreateEntry(TogglesCategory, "L_ToggleControlsHotkey", KeyCode.Home,
+            "Toggle Minimap Controls Hotkey",
+            "Key that hides or shows the clickable minimap controls; set to None to disable the hotkey");
 
         TimeDisplayTextColor = GetOrCreateEntry(TextDisplayCategory, "A_TimeDisplayTextColor",
             TimeDisplayColor.White, "Time Display Text Color", "Color of the time/date display text");
@@ -102,6 +111,46 @@ public sealed class MapPreferences
         TogglesCategory.SetFilePath(PreferencesPath);
         TextDisplayCategory.SetFilePath(PreferencesPath);
         PositionCategory.SetFilePath(PreferencesPath);
+
+        // The previous release defaulted this entry to F8. Change it only during the one-time file
+        // migration so a later user-selected F8 binding is never overwritten on startup.
+        if (migratedLegacyPreferences && ToggleControlsHotkey.Value == KeyCode.F8)
+        {
+            ToggleControlsHotkey.Value = KeyCode.Home;
+        }
+
+        // Persist all three categories immediately so the user-facing file always exists beside
+        // the DLL, including on a fresh installation with no legacy configuration.
+        TogglesCategory.SaveToFile(false);
+        TextDisplayCategory.SaveToFile(false);
+        PositionCategory.SaveToFile(false);
+    }
+
+    private static bool MigrateLegacyPreferencesFile()
+    {
+        try
+        {
+            string directory = Path.GetDirectoryName(PreferencesPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            if (File.Exists(PreferencesPath) || !File.Exists(LegacyPreferencesPath))
+            {
+                return false;
+            }
+
+            File.Copy(LegacyPreferencesPath, PreferencesPath, false);
+            MelonLogger.Msg(
+                $"NugzzMinimap migrated settings from '{LegacyPreferencesPath}' to '{PreferencesPath}'.");
+            return true;
+        }
+        catch (Exception exception)
+        {
+            MelonLogger.Warning($"NugzzMinimap could not migrate its settings file: {exception.Message}");
+            return false;
+        }
     }
 
     private static MelonPreferences_Category GetOrCreateCategory(string id, string displayName)

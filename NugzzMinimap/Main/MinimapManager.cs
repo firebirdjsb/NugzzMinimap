@@ -126,6 +126,7 @@ public sealed class MinimapManager : MonoBehaviour
             mapPreferences.ShowMapText.Value,
             mapPreferences.ShowLocationIcons.Value,
             mapPreferences.PlayerOrientedMap.Value,
+            mapPreferences.ToggleControlsHotkey.Value,
             mapPreferences.MinimapZoom.Value,
             mapPreferences.MinimapZoomScale,
             mapPreferences.MinimapPositionX.Value,
@@ -204,6 +205,7 @@ public sealed class MinimapManager : MonoBehaviour
         mapPreferences.ShowMapText.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnShowMapTextChanged));
         mapPreferences.ShowLocationIcons.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnShowLocationIconsChanged));
         mapPreferences.PlayerOrientedMap.OnEntryValueChanged.Subscribe(new LemonAction<bool, bool>(OnPlayerOrientedMapChanged));
+        mapPreferences.ToggleControlsHotkey.OnEntryValueChanged.Subscribe(new LemonAction<KeyCode, KeyCode>(OnToggleControlsHotkeyChanged));
         mapPreferences.MinimapZoom.OnEntryValueChanged.Subscribe(new LemonAction<int, int>(OnMinimapZoomChanged));
         mapPreferences.MinimapPositionX.OnEntryValueChanged.Subscribe(new LemonAction<float, float>(OnMinimapPositionXChanged));
         mapPreferences.MinimapPositionY.OnEntryValueChanged.Subscribe(new LemonAction<float, float>(OnMinimapPositionYChanged));
@@ -232,6 +234,7 @@ public sealed class MinimapManager : MonoBehaviour
         mapPreferences.ShowMapText.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnShowMapTextChanged));
         mapPreferences.ShowLocationIcons.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnShowLocationIconsChanged));
         mapPreferences.PlayerOrientedMap.OnEntryValueChanged.Unsubscribe(new LemonAction<bool, bool>(OnPlayerOrientedMapChanged));
+        mapPreferences.ToggleControlsHotkey.OnEntryValueChanged.Unsubscribe(new LemonAction<KeyCode, KeyCode>(OnToggleControlsHotkeyChanged));
         mapPreferences.MinimapZoom.OnEntryValueChanged.Unsubscribe(new LemonAction<int, int>(OnMinimapZoomChanged));
         mapPreferences.MinimapPositionX.OnEntryValueChanged.Unsubscribe(new LemonAction<float, float>(OnMinimapPositionXChanged));
         mapPreferences.MinimapPositionY.OnEntryValueChanged.Unsubscribe(new LemonAction<float, float>(OnMinimapPositionYChanged));
@@ -253,6 +256,10 @@ public sealed class MinimapManager : MonoBehaviour
     private void OnShowMapTextChanged(bool oldValue, bool newValue) => minimapView?.UpdateMapTextVisibility(newValue);
     private void OnShowLocationIconsChanged(bool oldValue, bool newValue) => minimapView?.UpdateLocationIconVisibility(newValue);
     private void OnPlayerOrientedMapChanged(bool oldValue, bool newValue) => minimapView?.UpdatePlayerOrientedMap(newValue);
+
+    [HideFromIl2Cpp]
+    private void OnToggleControlsHotkeyChanged(KeyCode oldValue, KeyCode newValue)
+        => minimapView?.UpdateControlsHotkey(newValue);
 
     [HideFromIl2Cpp]
     private void OnDeadDropButtonChanged(bool isVisible)

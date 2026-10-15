@@ -4,7 +4,9 @@ NugzzMinimap is a live HUD minimap for the IL2CPP build of **Schedule I**. It us
 map, building labels, location data, and character portraits while leaving the phone map available
 for normal use.
 
-Current version: **1.6.22**
+Current version: **1.6.26**
+
+Current compatibility target: **Schedule I 0.4.7f12**
 
 Authors: **XUnfairX / GrandmasAnkles**
 
@@ -13,6 +15,7 @@ Authors: **XUnfairX / GrandmasAnkles**
 - Live circular or rounded-square minimap with configurable size, zoom, and position.
 - Native building and place labels matching the zoomed-in phone map.
 - Compact live controls for dead drops, house/business icons, and map text.
+- Configurable hotkey for hiding or showing all clickable minimap controls without hiding the map.
 - Clickable `-` and `+` controls for changing the saved minimap zoom level.
 - Optional player-oriented mode that rotates the map while keeping labels and portraits upright.
 - Live NPC portraits with empty portrait markers automatically suppressed.
@@ -28,12 +31,13 @@ Authors: **XUnfairX / GrandmasAnkles**
 - Focus-return recovery that prevents a missed phone-map close callback from leaving the HUD hidden.
 - An automatically aligned sewer layer that appears while the local player is inside any sewer
   volume and returns to the surface map after leaving through a manhole, entrance, or door.
-- Allocation-free live actor discovery that avoids periodic scene-scan stutter.
+- Frame-budgeted live actor discovery that avoids periodic registry-scan stutter.
+- Conditional map/UI synchronization that avoids unnecessary Canvas rebuilds during gameplay.
 - Forced opposite-side placement that keeps dismissible game messages clear of the minimap.
 
 ## Requirements
 
-- **Schedule I** using its IL2CPP build.
+- **Schedule I 0.4.7f12** using its IL2CPP build.
 - [MelonLoader](https://github.com/LavaGang/MelonLoader) installed for Schedule I.
 - The game must have been launched through MelonLoader at least once.
 
@@ -51,18 +55,19 @@ Authors: **XUnfairX / GrandmasAnkles**
 5. Remove any older `BetterMinimap` or `NugzzMinimap` DLLs so only one copy is installed.
 6. Start the game through MelonLoader.
 
-MelonLoader should report `NugzzMinimap v1.6.22` during startup.
+MelonLoader should report `NugzzMinimap v1.6.26` during startup.
 
 ## Configuration
 
 Settings are stored in:
 
 ```text
-Schedule I/UserData/NugzzMinimap.cfg
+Schedule I/Mods/NugzzMinimap Mod Settings.cfg
 ```
 
-The file is created or repaired automatically when the mod starts. Most settings update while the
-game is running.
+The file is created or repaired automatically beside `NugzzMinimap.dll` when the mod starts. An
+existing `UserData/NugzzMinimap.cfg` is copied into the new file once so prior settings are kept.
+Most settings update while the game is running.
 
 | Setting | Default | Description |
 | --- | ---: | --- |
@@ -77,6 +82,7 @@ game is running.
 | `I_ShowMapText` | `true` | Shows player names, building names, and location labels. Also controlled by the HUD button. |
 | `J_ShowLocationIcons` | `true` | Shows house, business, and other location icons. Also controlled by the HUD button. |
 | `K_PlayerOrientedMap` | `false` | Rotates the minimap with the local player. Also controlled by `ROTATE ON/OFF`. |
+| `L_ToggleControlsHotkey` | `Home` | Hides or shows the clickable minimap controls. Use `None` to disable the hotkey. |
 | `A_TimeDisplayTextColor` | `White` | Sets the clock text color. |
 | `B_TimeDisplayBackgroundOpacity` | `65` | Sets clock background opacity from `0` through `100`. |
 | `C_TimeDisplayTextSize` | `18` | Sets clock text size from `10` through `30`. |
@@ -87,6 +93,8 @@ enabled and red means it is hidden. Every click updates and saves its matching p
 `ICONS` control does not hide NPCs, police, players, potential-customer areas, or dead drops.
 The zoom `-` and `+` buttons sit at the minimap's lower-left and lower-right corners. The centered
 second row provides `ROTATE ON/OFF`; all three controls update the saved settings.
+Press `Home` by default to hide or show both control rows and the corner zoom buttons. This does not
+change the minimap layers, zoom, rotation, clock, or minimap visibility.
 
 ## Building from source
 
@@ -119,7 +127,7 @@ NugzzMinimap/bin/Release/net6.0/NugzzMinimap.dll
 - Confirm `NugzzMinimap.dll` is directly inside `Schedule I/Mods`.
 - Remove duplicate or older minimap DLLs.
 - Launch the game through MelonLoader.
-- Check the newest file in `Schedule I/MelonLoader/Logs` for `NugzzMinimap v1.6.22`.
+- Check the newest file in `Schedule I/MelonLoader/Logs` for `NugzzMinimap v1.6.26`.
 
 ### The project does not build
 
@@ -130,7 +138,7 @@ NugzzMinimap/bin/Release/net6.0/NugzzMinimap.dll
 ### The configuration is outdated
 
 The mod adds missing settings automatically. To restore every default, close the game, back up
-`UserData/NugzzMinimap.cfg`, delete it, and launch the game again.
+`Mods/NugzzMinimap Mod Settings.cfg`, delete it, and launch the game again.
 
 ## Project structure
 
@@ -144,9 +152,11 @@ The mod adds missing settings automatically. To restore every default, close the
 
 ## Verification
 
-Version 1.6.22 builds in Debug and Release with zero compiler warnings or errors against the current
-Schedule I and MelonLoader IL2CPP assemblies. Runtime behavior must be verified in the game because
-Schedule I does not provide a headless test environment.
+Version 1.6.26 builds in Debug and Release with zero compiler warnings or errors against Schedule I
+0.4.7f12 and its freshly generated MelonLoader IL2CPP assemblies. The supplied Il2CppDumper dummy
+DLL confirms that every game type and member used by the mod remains present. All Harmony targets
+also registered successfully in the 0.4.7f12 startup log. Full HUD behavior must still be verified
+in a loaded game because Schedule I does not provide a headless gameplay test environment.
 
 ## Disclaimer
 

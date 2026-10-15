@@ -1,4 +1,5 @@
 using System;
+using NugzzMinimap.Helpers;
 using NugzzMinimap.Main;
 using NugzzMinimap.NPCSystem;
 using HarmonyLib;
@@ -16,6 +17,17 @@ public sealed class Core : MelonMod
     public override void OnInitializeMelon()
     {
         base.OnInitializeMelon();
+
+        try
+        {
+            // Create or migrate the user-editable settings file during loader startup. The main
+            // scene loads these same shared MelonPreferences entries again when the HUD is built.
+            new MapPreferences().LoadPreferences();
+        }
+        catch (Exception exception)
+        {
+            MelonLogger.Warning($"NugzzMinimap could not initialize its settings file: {exception.Message}");
+        }
 
         try
         {
